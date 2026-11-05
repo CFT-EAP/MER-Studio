@@ -1,0 +1,50 @@
+erDiagram
+    PACIENTE ||--o{ CITA : "agenda"
+    MEDICO ||--o{ CITA : "atiende"
+    ESPECIALIDAD ||--|{ MEDICO : "agrupa"
+    CITA ||--o| CONSULTA : "genera"
+    CONSULTA ||--o{ RECETA : "emite"
+
+    PACIENTE {
+        int id PK
+        string documento UK "DNI o Pasaporte"
+        string nombreCompleto
+        datetime fechaNacimiento
+        string telefono
+    }
+
+    ESPECIALIDAD {
+        int id PK
+        string nombre UK
+        string pabellon
+    }
+
+    MEDICO {
+        int id PK
+        int especialidadId FK
+        string matricula UK
+        string nombreCompleto
+    }
+
+    CITA {
+        int id PK
+        int pacienteId FK
+        int medicoId FK
+        datetime fechaHora
+        string estado
+    }
+
+    CONSULTA {
+        int id PK
+        int citaId FK,UK
+        string diagnostico
+        string signosVitales
+    }
+
+    RECETA {
+        int id PK
+        int consultaId FK
+        string medicamento
+        string dosis
+        int duracionDias
+    }

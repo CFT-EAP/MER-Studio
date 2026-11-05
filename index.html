@@ -1,0 +1,3375 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MER Studio — Visualizador y Editor Prisma, Mermaid &amp; SQL</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <style>
+    :root {
+      --background: #0f172a;
+      --content: #0f172a;
+      --card: #1e293b;
+      --sidebar: #141d2f;
+      --border: #334155;
+      --foreground: #f8fafc;
+      --muted-foreground: #94a3b8;
+      --placeholder: #64748b;
+      --primary: #3b82f6;
+      --primary-foreground: #ffffff;
+      --secondary: #283548;
+      --secondary-foreground: #e2e8f0;
+      --accent: #38bdf8;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100vh;
+      overflow: hidden;
+      user-select: none;
+    }
+    .code-editor {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      tab-size: 2;
+      user-select: text;
+    }
+    .canvas-grid {
+      background-image: radial-gradient(var(--border) 1.25px, transparent 1.25px);
+      background-size: 24px 24px;
+    }
+    .entity-card {
+      transition: box-shadow 0.15s ease, border-color 0.15s ease;
+    }
+    .entity-card:hover {
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.25);
+    }
+    .rel-path {
+      transition: stroke-width 0.15s ease, opacity 0.15s ease;
+      cursor: pointer;
+    }
+    .rel-path:hover {
+      stroke-width: 3px;
+    }
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body class="bg-[var(--background)] text-[var(--foreground)] antialiased flex flex-col h-screen w-screen overflow-hidden">
+
+  <!-- TOP HEADER BAR -->
+  <header class="h-14 shrink-0 bg-[var(--sidebar)] border-b border-[var(--border)] px-4 flex items-center justify-between gap-3 z-30">
+    <div class="flex items-center gap-3">
+      <div class="px-2 h-8 rounded-lg bg-[var(--primary)] text-[var(--primary-foreground)] flex items-center justify-center font-bold text-xs shadow-sm">
+        MER
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <h1 class="font-semibold text-sm tracking-tight text-[var(--foreground)]">MER Studio</h1>
+          <span class="text-xs px-2 py-0.5 rounded-full bg-[var(--secondary)] text-[var(--secondary-foreground)] font-medium">Prisma · Mermaid · SQL</span>
+        </div>
+        <p class="text-xs text-[var(--muted-foreground)] hidden sm:block">Visualizador, validador y editor bidireccional de Modelos Entidad-Relación</p>
+      </div>
+    </div>
+
+    <!-- Preset Selector & Undo/Redo -->
+    <div class="flex items-center gap-2 flex-wrap">
+      <!-- Live Validation Pill -->
+      <button id="headerValidationBtn" onclick="switchLeftTab('validator')" class="px-2.5 py-1 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--secondary)] text-xs font-medium flex items-center gap-1.5 transition" title="Ver diagnósticos de validación">
+        <span id="headerValidationDot" class="w-2 h-2 rounded-full bg-emerald-500"></span>
+        <span id="headerValidationText">Esquema válido</span>
+      </button>
+
+      <div class="flex items-center bg-[var(--card)] border border-[var(--border)] rounded-lg p-0.5">
+        <button id="btnUndo" onclick="undo()" title="Deshacer (Ctrl+Z)" class="px-2.5 py-1 text-xs rounded-md hover:bg-[var(--secondary)] text-[var(--foreground)] disabled:opacity-40 transition">
+          ↶ Deshacer
+        </button>
+        <button id="btnRedo" onclick="redo()" title="Rehacer (Ctrl+Y)" class="px-2.5 py-1 text-xs rounded-md hover:bg-[var(--secondary)] text-[var(--foreground)] disabled:opacity-40 transition">
+          ↷ Rehacer
+        </button>
+      </div>
+
+      <select id="presetSelect" onchange="loadPreset(this.value)" class="bg-[var(--card)] border border-[var(--border)] text-[var(--foreground)] text-xs rounded-lg px-2.5 py-1.5 outline-none focus:border-[var(--primary)]">
+        <option value="" disabled selected>📂 Cargar plantilla...</option>
+        <option value="ecommerce">🛒 E-Commerce (Tiendas, Pedidos, Productos)</option>
+        <option value="blog">📝 Blog &amp; CMS (Usuarios, Posts, Comentarios)</option>
+        <option value="hospital">🏥 Sistema Clínico (Pacientes, Médicos, Citas)</option>
+        <option value="saas">🏢 SaaS Multi-Tenant (Organizaciones, Proyectos, Tareas)</option>
+      </select>
+
+      <label class="cursor-pointer bg-[var(--card)] hover:bg-[var(--secondary)] border border-[var(--border)] text-[var(--foreground)] text-xs font-medium px-3 py-1.5 rounded-lg transition flex items-center gap-1.5">
+        <span>📥 Importar</span>
+        <input id="fileInput" type="file" accept=".prisma,.mmd,.mermaid,.sql,.txt,.json" class="hidden" onchange="handleFileUpload(event)" />
+      </label>
+
+      <div class="relative group">
+        <button class="bg-[var(--primary)] text-[var(--primary-foreground)] text-xs font-medium px-3 py-1.5 rounded-lg shadow-sm hover:opacity-90 transition flex items-center gap-1.5">
+          <span>📤 Exportar</span>
+          <span>▾</span>
+        </button>
+        <div class="hidden group-hover:flex flex-col absolute right-0 top-full mt-1 w-56 bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-lg py-1.5 z-50">
+          <button onclick="exportFile('prisma')" class="text-left px-3 py-2 text-xs hover:bg-[var(--secondary)] flex items-center justify-between">
+            <span>Exportar schema.prisma</span>
+            <span class="text-[var(--muted-foreground)]">.prisma</span>
+          </button>
+          <button onclick="exportFile('mermaid')" class="text-left px-3 py-2 text-xs hover:bg-[var(--secondary)] flex items-center justify-between">
+            <span>Exportar erDiagram</span>
+            <span class="text-[var(--muted-foreground)]">.mmd</span>
+          </button>
+          <button onclick="exportFile('postgres')" class="text-left px-3 py-2 text-xs hover:bg-[var(--secondary)] flex items-center justify-between">
+            <span>Exportar DDL PostgreSQL</span>
+            <span class="text-[var(--muted-foreground)]">.sql</span>
+          </button>
+          <button onclick="exportFile('mysql')" class="text-left px-3 py-2 text-xs hover:bg-[var(--secondary)] flex items-center justify-between">
+            <span>Exportar DDL MySQL</span>
+            <span class="text-[var(--muted-foreground)]">.sql</span>
+          </button>
+          <div class="my-1 border-t border-[var(--border)]"></div>
+          <button onclick="exportFile('svg')" class="text-left px-3 py-2 text-xs hover:bg-[var(--secondary)] flex items-center justify-between">
+            <span>Exportar Diagrama SVG</span>
+            <span class="text-[var(--muted-foreground)]">.svg</span>
+          </button>
+          <button onclick="exportFile('json')" class="text-left px-3 py-2 text-xs hover:bg-[var(--secondary)] flex items-center justify-between">
+            <span>Exportar Modelo JSON</span>
+            <span class="text-[var(--muted-foreground)]">.json</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN WORKSPACE -->
+  <div class="flex-1 flex overflow-hidden relative">
+
+    <!-- LEFT PANEL: CODE, SQL, INSPECTOR & VALIDATOR TABS -->
+    <aside id="leftSidebar" class="w-[440px] shrink-0 bg-[var(--sidebar)] border-r border-[var(--border)] flex flex-col h-full z-20">
+      <!-- Mode Switcher Tabs -->
+      <div class="p-2 border-b border-[var(--border)] flex items-center justify-between gap-1 bg-[var(--card)]">
+        <div class="grid grid-cols-5 bg-[var(--background)] p-0.5 rounded-lg border border-[var(--border)] w-full gap-0.5">
+          <button id="tabBtnPrisma" onclick="switchLeftTab('prisma')" class="py-1.5 px-1.5 rounded-md text-xs font-medium transition truncate">
+            ▲ Prisma
+          </button>
+          <button id="tabBtnMermaid" onclick="switchLeftTab('mermaid')" class="py-1.5 px-1.5 rounded-md text-xs font-medium transition truncate">
+            🧜‍♀️ Mermaid
+          </button>
+          <button id="tabBtnSql" onclick="switchLeftTab('sql')" class="py-1.5 px-1.5 rounded-md text-xs font-medium transition truncate">
+            🗄️ SQL DDL
+          </button>
+          <button id="tabBtnInspector" onclick="switchLeftTab('inspector')" class="py-1.5 px-1.5 rounded-md text-xs font-medium transition truncate">
+            🛠️ Editor
+          </button>
+          <button id="tabBtnValidator" onclick="switchLeftTab('validator')" class="py-1.5 px-1.5 rounded-md text-xs font-medium transition truncate flex items-center justify-center gap-1">
+            <span>✅ Validar</span>
+            <span id="tabValidatorBadge" class="px-1.5 rounded-full bg-emerald-500/20 text-emerald-500 text-xs font-bold">0</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- CODE VIEW (PRISMA, MERMAID OR SQL DDL) -->
+      <div id="codePanel" class="flex-1 flex flex-col overflow-hidden">
+        <div class="px-3 py-2 border-b border-[var(--border)] flex items-center justify-between gap-2 bg-[var(--sidebar)]">
+          <div class="flex items-center gap-2">
+            <span id="codeFormatBadge" class="text-xs font-semibold text-[var(--foreground)]">schema.prisma</span>
+            <!-- SQL Dialect Sub-selector (only visible in SQL tab) -->
+            <select id="sqlDialectSelect" onchange="changeSqlDialect(this.value)" class="hidden bg-[var(--card)] border border-[var(--border)] text-[var(--foreground)] text-xs rounded-md px-2 py-0.5 outline-none">
+              <option value="postgresql">PostgreSQL</option>
+              <option value="mysql">MySQL / MariaDB</option>
+            </select>
+            <span id="parseStatusBadge" class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-500 font-medium">Sincronizado</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <button onclick="copyCodeToClipboard()" class="text-xs px-2.5 py-1 rounded-md bg-[var(--card)] hover:bg-[var(--secondary)] border border-[var(--border)] transition">
+              📋 Copiar
+            </button>
+            <button onclick="applyCodeChanges(true)" class="text-xs px-2.5 py-1 rounded-md bg-[var(--primary)] text-[var(--primary-foreground)] font-medium hover:opacity-90 transition">
+              ⚡ Aplicar
+            </button>
+          </div>
+        </div>
+
+        <div class="relative flex-1 flex overflow-hidden bg-[var(--background)]">
+          <textarea
+            id="codeTextarea"
+            spellcheck="false"
+            oninput="handleCodeInput()"
+            class="code-editor w-full h-full p-3.5 bg-transparent text-[var(--foreground)] text-xs leading-relaxed resize-none outline-none overflow-auto"
+            placeholder="Escribe o pega aquí tu código Prisma, Mermaid o SQL CREATE TABLE..."
+          ></textarea>
+        </div>
+
+        <!-- Parse Error / Info Bar -->
+        <div id="parseMessageBar" class="px-3 py-2 border-t border-[var(--border)] bg-[var(--card)] text-xs text-[var(--muted-foreground)] flex items-center justify-between">
+          <span id="parseMessageText">Edita el código para actualizar el diagrama en tiempo real.</span>
+        </div>
+      </div>
+
+      <!-- VISUAL INSPECTOR VIEW -->
+      <div id="inspectorPanel" class="hidden flex-1 flex flex-col overflow-hidden">
+        <!-- Quick Actions -->
+        <div class="p-3 border-b border-[var(--border)] flex items-center gap-2 bg-[var(--card)]">
+          <button onclick="addNewEntity()" class="flex-1 py-1.5 px-2.5 rounded-lg bg-[var(--primary)] text-[var(--primary-foreground)] text-xs font-medium hover:opacity-90 transition">
+            + Nueva Entidad
+          </button>
+          <button onclick="openRelationModal()" class="flex-1 py-1.5 px-2.5 rounded-lg bg-[var(--secondary)] text-[var(--secondary-foreground)] border border-[var(--border)] text-xs font-medium hover:opacity-90 transition">
+            + Nueva Relación
+          </button>
+          <button onclick="addNewEnum()" class="py-1.5 px-2.5 rounded-lg bg-[var(--background)] text-[var(--foreground)] border border-[var(--border)] text-xs font-medium hover:bg-[var(--secondary)] transition" title="Añadir Enum Prisma">
+            + Enum
+          </button>
+        </div>
+
+        <!-- Search filter -->
+        <div class="px-3 py-2 border-b border-[var(--border)]">
+          <input
+            id="inspectorSearch"
+            type="text"
+            oninput="renderInspector()"
+            placeholder="🔍 Buscar entidad, campo o relación..."
+            class="w-full bg-[var(--card)] border border-[var(--border)] rounded-lg px-3 py-1.5 text-xs text-[var(--foreground)] outline-none focus:border-[var(--primary)]"
+          />
+        </div>
+
+        <!-- Scrollable Inspector Content -->
+        <div id="inspectorContent" class="flex-1 overflow-y-auto p-3 space-y-3"></div>
+      </div>
+
+      <!-- VALIDATOR / DIAGNOSTICS VIEW -->
+      <div id="validatorPanel" class="hidden flex-1 flex flex-col overflow-hidden">
+        <div class="p-3 border-b border-[var(--border)] bg-[var(--card)] flex items-center justify-between">
+          <div>
+            <h2 class="font-semibold text-xs text-[var(--foreground)]">Diagnóstico y Reglas Prisma / SQL</h2>
+            <p class="text-xs text-[var(--muted-foreground)]">Validación de claves, tipos referenciales, onDelete y convenciones</p>
+          </div>
+          <button id="btnAutoFixAll" onclick="autoFixAllDiagnostics()" class="px-3 py-1.5 rounded-lg bg-[var(--primary)] text-[var(--primary-foreground)] text-xs font-medium hover:opacity-90 transition">
+            🪄 Auto-Corregir Todo
+          </button>
+        </div>
+        <div id="validatorContent" class="flex-1 overflow-y-auto p-3 space-y-2.5"></div>
+      </div>
+    </aside>
+
+    <!-- CENTER / RIGHT: INTERACTIVE ERD CANVAS -->
+    <main class="flex-1 flex flex-col relative overflow-hidden bg-[var(--background)]">
+      <!-- Floating Canvas Toolbar -->
+      <div class="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none z-20">
+        <div class="flex items-center gap-2 pointer-events-auto bg-[var(--card)]/95 backdrop-blur border border-[var(--border)] rounded-xl p-1.5 shadow-sm">
+          <button onclick="toggleSidebar()" class="px-2.5 py-1 rounded-lg hover:bg-[var(--secondary)] text-xs font-medium transition" title="Mostrar/Ocultar panel lateral">
+            ☰ Panel
+          </button>
+          <div class="h-4 w-[1px] bg-[var(--border)]"></div>
+          <button onclick="addNewEntity()" class="px-2.5 py-1 rounded-lg hover:bg-[var(--secondary)] text-xs font-medium transition">
+            + Entidad
+          </button>
+          <button onclick="openRelationModal()" class="px-2.5 py-1 rounded-lg hover:bg-[var(--secondary)] text-xs font-medium transition">
+            🔗 Conectar
+          </button>
+          <div class="h-4 w-[1px] bg-[var(--border)]"></div>
+          <button onclick="autoLayout('layered')" class="px-2.5 py-1 rounded-lg hover:bg-[var(--secondary)] text-xs font-medium transition" title="Ordenar automáticamente en capas">
+            ✨ Auto-Ordenar
+          </button>
+          <button onclick="autoLayout('grid')" class="px-2.5 py-1 rounded-lg hover:bg-[var(--secondary)] text-xs font-medium transition" title="Ordenar en cuadrícula">
+            ⊞ Cuadrícula
+          </button>
+        </div>
+
+        <!-- Zoom & Stats -->
+        <div class="flex items-center gap-2 pointer-events-auto bg-[var(--card)]/95 backdrop-blur border border-[var(--border)] rounded-xl p-1.5 shadow-sm">
+          <span id="statsLabel" class="text-xs text-[var(--muted-foreground)] px-2 hidden md:inline">0 entidades · 0 relaciones</span>
+          <div class="h-4 w-[1px] bg-[var(--border)] hidden md:block"></div>
+          <button onclick="zoomBy(-0.15)" class="w-7 h-7 rounded-lg hover:bg-[var(--secondary)] text-xs font-bold flex items-center justify-center transition" title="Alejar">−</button>
+          <button onclick="resetZoom()" id="zoomPercentBtn" class="px-2 py-1 rounded-lg hover:bg-[var(--secondary)] text-xs font-mono transition" title="Restablecer zoom">100%</button>
+          <button onclick="zoomBy(0.15)" class="w-7 h-7 rounded-lg hover:bg-[var(--secondary)] text-xs font-bold flex items-center justify-center transition" title="Acercar">+</button>
+          <button onclick="fitToScreen()" class="px-2.5 py-1 rounded-lg hover:bg-[var(--secondary)] text-xs font-medium transition" title="Ajustar diagrama a la pantalla">
+            ⛶ Ajustar
+          </button>
+        </div>
+      </div>
+
+      <!-- Crow's Foot Legend (Bottom Left) -->
+      <div class="absolute bottom-3 left-3 pointer-events-auto z-20 bg-[var(--card)]/95 backdrop-blur border border-[var(--border)] rounded-xl px-3 py-2 shadow-sm flex items-center gap-4 text-xs">
+        <span class="font-semibold text-[var(--foreground)]">Notación:</span>
+        <span class="flex items-center gap-1 text-[var(--muted-foreground)]"><code class="text-[var(--foreground)] font-bold">||</code> Uno (1)</span>
+        <span class="flex items-center gap-1 text-[var(--muted-foreground)]"><code class="text-[var(--foreground)] font-bold">|o</code> Cero o Uno (0..1)</span>
+        <span class="flex items-center gap-1 text-[var(--muted-foreground)]"><code class="text-[var(--foreground)] font-bold">|{</code> Uno o Muchos (1..N)</span>
+        <span class="flex items-center gap-1 text-[var(--muted-foreground)]"><code class="text-[var(--foreground)] font-bold">o{</code> Cero o Muchos (0..N)</span>
+      </div>
+
+      <!-- Interactive Viewport -->
+      <div
+        id="canvasViewport"
+        class="flex-1 w-full h-full canvas-grid relative overflow-hidden cursor-grab active:cursor-grabbing"
+      >
+        <!-- Transform Container -->
+        <div id="canvasWorld" class="absolute top-0 left-0 origin-top-left" style="width: 4000px; height: 4000px;">
+          <!-- SVG Layer for Relationships -->
+          <svg id="relationsSvg" class="absolute inset-0 w-full h-full pointer-events-none overflow-visible"></svg>
+          <!-- HTML Layer for Entity Cards -->
+          <div id="entitiesContainer" class="absolute inset-0 w-full h-full pointer-events-none"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- MODAL: CREATE / EDIT RELATIONSHIP -->
+  <div id="relationModal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+    <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl w-full max-w-lg p-5 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between border-b border-[var(--border)] pb-3">
+        <h3 id="relationModalTitle" class="font-semibold text-base text-[var(--foreground)]">🔗 Configurar Relación</h3>
+        <button onclick="closeRelationModal()" class="text-xs px-2 py-1 rounded-md hover:bg-[var(--secondary)] text-[var(--muted-foreground)]">✕</button>
+      </div>
+
+      <input type="hidden" id="relEditId" value="" />
+
+      <div class="grid grid-cols-2 gap-3">
+        <!-- Source -->
+        <div class="p-3 rounded-xl bg-[var(--background)] border border-[var(--border)] space-y-2">
+          <span class="text-xs font-semibold text-[var(--foreground)] block">Entidad Origen (1 / Padre)</span>
+          <div>
+            <label class="text-xs text-[var(--muted-foreground)] block mb-1">Entidad</label>
+            <select id="relSourceEntity" onchange="populateRelationFieldSelects('source')" class="w-full bg-[var(--card)] border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-xs text-[var(--foreground)]"></select>
+          </div>
+          <div>
+            <label class="text-xs text-[var(--muted-foreground)] block mb-1">Campo Clave (PK)</label>
+            <select id="relSourceField" class="w-full bg-[var(--card)] border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-xs text-[var(--foreground)]"></select>
+          </div>
+          <div>
+            <label class="text-xs text-[var(--muted-foreground)] block mb-1">Cardinalidad Origen</label>
+            <select id="relSourceCard" class="w-full bg-[var(--card)] border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-xs text-[var(--foreground)]">
+              <option value="||">|| — Exactamente Uno (1)</option>
+              <option value="|o">|o — Cero o Uno (0..1)</option>
+              <option value="|{">|{ — Uno o Muchos (1..N)</option>
+              <option value="o{">o{ — Cero o Muchos (0..N)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Target -->
+        <div class="p-3 rounded-xl bg-[var(--background)] border border-[var(--border)] space-y-2">
+          <span class="text-xs font-semibold text-[var(--foreground)] block">Entidad Destino (FK / Hijo)</span>
+          <div>
+            <label class="text-xs text-[var(--muted-foreground)] block mb-1">Entidad</label>
+            <select id="relTargetEntity" onchange="populateRelationFieldSelects('target')" class="w-full bg-[var(--card)] border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-xs text-[var(--foreground)]"></select>
+          </div>
+          <div>
+            <label class="text-xs text-[var(--muted-foreground)] block mb-1">Campo Clave Foránea (FK)</label>
+            <select id="relTargetField" class="w-full bg-[var(--card)] border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-xs text-[var(--foreground)]"></select>
+          </div>
+          <div>
+            <label class="text-xs text-[var(--muted-foreground)] block mb-1">Cardinalidad Destino</label>
+            <select id="relTargetCard" class="w-full bg-[var(--card)] border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-xs text-[var(--foreground)]">
+              <option value="o{">o{ — Cero o Muchos (0..N)</option>
+              <option value="|{">|{ — Uno o Muchos (1..N)</option>
+              <option value="|o">|o — Cero o Uno (0..1)</option>
+              <option value="||">|| — Exactamente Uno (1)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-3 gap-3">
+        <div>
+          <label class="text-xs text-[var(--muted-foreground)] block mb-1">Nombre / Etiqueta</label>
+          <input id="relLabelInput" type="text" placeholder="ej. escribe, pertenece" class="w-full bg-[var(--background)] border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-xs text-[var(--foreground)] outline-none" />
+        </div>
+        <div>
+          <label class="text-xs text-[var(--muted-foreground)] block mb-1">Tipo de Línea</label>
+          <select id="relIdentifying" class="w-full bg-[var(--background)] border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-xs text-[var(--foreground)]">
+            <option value="true">Sólida (Identificadora --)</option>
+            <option value="false">Punteada (No-Identificadora ..)</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-[var(--muted-foreground)] block mb-1">Acción onDelete (Prisma/SQL)</label>
+          <select id="relOnDelete" class="w-full bg-[var(--background)] border border-[var(--border)] rounded-lg px-2.5 py-1.5 text-xs text-[var(--foreground)]">
+            <option value="">Por defecto</option>
+            <option value="Cascade">Cascade</option>
+            <option value="SetNull">SetNull</option>
+            <option value="Restrict">Restrict</option>
+            <option value="NoAction">NoAction</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between pt-2 border-t border-[var(--border)]">
+        <button id="btnDeleteRelationModal" onclick="deleteRelationFromModal()" class="hidden px-3 py-1.5 rounded-lg bg-red-500/15 text-red-500 hover:bg-red-500/25 text-xs font-medium transition">
+          🗑️ Eliminar Relación
+        </button>
+        <div class="flex items-center gap-2 ml-auto">
+          <button onclick="closeRelationModal()" class="px-3 py-1.5 rounded-lg bg-[var(--secondary)] text-[var(--secondary-foreground)] text-xs font-medium">
+            Cancelar
+          </button>
+          <button onclick="saveRelationModal()" class="px-4 py-1.5 rounded-lg bg-[var(--primary)] text-[var(--primary-foreground)] text-xs font-medium">
+            Guardar Relación
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST NOTIFICATION -->
+  <div id="toast" class="fixed bottom-4 right-4 z-50 hidden bg-[var(--foreground)] text-[var(--background)] px-4 py-2 rounded-xl shadow-lg text-xs font-medium transition-all"></div>
+
+  <script>
+    // ============================================================================
+    // PALETTE & CONSTANTS
+    // ============================================================================
+    const ENTITY_COLORS = [
+      '#3b82f6', // blue
+      '#10b981', // emerald
+      '#8b5cf6', // violet
+      '#f59e0b', // amber
+      '#ec4899', // pink
+      '#06b6d4', // cyan
+      '#f97316', // orange
+      '#6366f1'  // indigo
+    ];
+
+    const PRISMA_SCALAR_TYPES = [
+      'Int', 'String', 'Boolean', 'DateTime', 'Float', 'Decimal', 'Json', 'BigInt', 'Bytes', 'UUID'
+    ];
+
+    const CARD_WIDTH = 268;
+    const CARD_HEADER_HEIGHT = 40;
+    const CARD_ROW_HEIGHT = 30;
+
+    // ============================================================================
+    // APPLICATION STATE
+    // ============================================================================
+    let state = {
+      entities: [],
+      enums: [],
+      relations: [],
+      prismaMeta: {
+        datasource: `datasource db {\n  provider = "postgresql"\n  url      = env("DATABASE_URL")\n}`,
+        generator: `generator client {\n  provider = "prisma-client-js"\n}`
+      }
+    };
+
+    let activeLeftTab = 'prisma'; // 'prisma' | 'mermaid' | 'sql' | 'inspector' | 'validator'
+    let activeSqlDialect = 'postgresql'; // 'postgresql' | 'mysql'
+    let selectedEntityId = null;
+    let selectedRelationId = null;
+    let hoveredRelationId = null;
+    let currentDiagnostics = [];
+
+    // Viewport pan & zoom
+    let viewport = {
+      x: 40,
+      y: 60,
+      zoom: 1
+    };
+
+    // Undo / Redo stacks
+    let historyStack = [];
+    let redoStack = [];
+    let codeDebounceTimer = null;
+
+    // ============================================================================
+    // PRESET TEMPLATES
+    // ============================================================================
+    const PRESETS = {
+      ecommerce: `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  SHIPPED
+  CANCELLED
+}
+
+model Customer {
+  id        Int       @id @default(autoincrement())
+  email     String    @unique
+  fullName  String
+  phone     String?
+  createdAt DateTime  @default(now())
+  orders    Order[]
+  addresses Address[]
+}
+
+model Address {
+  id         Int      @id @default(autoincrement())
+  customerId Int
+  street     String
+  city       String
+  country    String
+  isDefault  Boolean  @default(false)
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+}
+
+model Category {
+  id       Int       @id @default(autoincrement())
+  name     String    @unique
+  slug     String    @unique
+  products Product[]
+}
+
+model Product {
+  id         Int         @id @default(autoincrement())
+  categoryId Int
+  sku        String      @unique
+  name       String
+  price      Decimal
+  stock      Int         @default(0)
+  isActive   Boolean     @default(true)
+  category   Category    @relation(fields: [categoryId], references: [id])
+  items      OrderItem[]
+}
+
+model Order {
+  id         Int         @id @default(autoincrement())
+  customerId Int
+  status     OrderStatus @default(PENDING)
+  total      Decimal
+  placedAt   DateTime    @default(now())
+  customer   Customer    @relation(fields: [customerId], references: [id])
+  items      OrderItem[]
+}
+
+model OrderItem {
+  id        Int     @id @default(autoincrement())
+  orderId   Int
+  productId Int
+  quantity  Int     @default(1)
+  unitPrice Decimal
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product   Product @relation(fields: [productId], references: [id])
+}`,
+
+      blog: `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  ADMIN
+  AUTHOR
+  READER
+}
+
+model User {
+  id        Int       @id @default(autoincrement())
+  username  String    @unique
+  email     String    @unique
+  role      Role      @default(READER)
+  createdAt DateTime  @default(now())
+  profile   Profile?
+  posts     Post[]
+  comments  Comment[]
+}
+
+model Profile {
+  id        Int     @id @default(autoincrement())
+  userId    Int     @unique
+  bio       String?
+  avatarUrl String?
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Post {
+  id          Int       @id @default(autoincrement())
+  authorId    Int
+  title       String
+  slug        String    @unique
+  content     String
+  published   Boolean   @default(false)
+  publishedAt DateTime?
+  author      User      @relation(fields: [authorId], references: [id])
+  comments    Comment[]
+  tags        PostTag[]
+}
+
+model Comment {
+  id        Int      @id @default(autoincrement())
+  postId    Int
+  authorId  Int
+  body      String
+  createdAt DateTime @default(now())
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author    User     @relation(fields: [authorId], references: [id])
+}
+
+model Tag {
+  id    Int       @id @default(autoincrement())
+  name  String    @unique
+  posts PostTag[]
+}
+
+model PostTag {
+  id     Int  @id @default(autoincrement())
+  postId Int
+  tagId  Int
+  post   Post @relation(fields: [postId], references: [id], onDelete: Cascade)
+  tag    Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+}`,
+
+      hospital: `erDiagram
+    PACIENTE ||--o{ CITA : "agenda"
+    MEDICO ||--o{ CITA : "atiende"
+    ESPECIALIDAD ||--|{ MEDICO : "agrupa"
+    CITA ||--o| CONSULTA : "genera"
+    CONSULTA ||--o{ RECETA : "emite"
+
+    PACIENTE {
+        int id PK
+        string documento UK "DNI o Pasaporte"
+        string nombreCompleto
+        datetime fechaNacimiento
+        string telefono
+    }
+
+    ESPECIALIDAD {
+        int id PK
+        string nombre UK
+        string pabellon
+    }
+
+    MEDICO {
+        int id PK
+        int especialidadId FK
+        string matricula UK
+        string nombreCompleto
+    }
+
+    CITA {
+        int id PK
+        int pacienteId FK
+        int medicoId FK
+        datetime fechaHora
+        string estado
+    }
+
+    CONSULTA {
+        int id PK
+        int citaId FK,UK
+        string diagnostico
+        string signosVitales
+    }
+
+    RECETA {
+        int id PK
+        int consultaId FK
+        string medicamento
+        string dosis
+        int duracionDias
+    }`,
+
+      saas: `datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum PlanTier {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
+model Organization {
+  id        Int          @id @default(autoincrement())
+  name      String
+  slug      String       @unique
+  plan      PlanTier     @default(FREE)
+  createdAt DateTime     @default(now())
+  members   Membership[]
+  projects  Project[]
+}
+
+model Account {
+  id          Int          @id @default(autoincrement())
+  email       String       @unique
+  fullName    String
+  memberships Membership[]
+  tasks       Task[]
+}
+
+model Membership {
+  id             Int          @id @default(autoincrement())
+  organizationId Int
+  accountId      Int
+  role           String       @default("MEMBER")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  account        Account      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+}
+
+model Project {
+  id             Int          @id @default(autoincrement())
+  organizationId Int
+  name           String
+  key            String       @unique
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  tasks          Task[]
+}
+
+model Task {
+  id          Int      @id @default(autoincrement())
+  projectId   Int
+  assigneeId  Int?
+  title       String
+  status      String   @default("TODO")
+  priority    Int      @default(2)
+  dueDate     DateTime?
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignee    Account? @relation(fields: [assigneeId], references: [id], onDelete: SetNull)
+}`
+    };
+
+    // ============================================================================
+    // HISTORY MANAGEMENT (UNDO / REDO)
+    // ============================================================================
+    function pushHistory() {
+      const snapshot = JSON.stringify(state);
+      if (historyStack.length > 0 && historyStack[historyStack.length - 1] === snapshot) {
+        return;
+      }
+      historyStack.push(snapshot);
+      if (historyStack.length > 40) historyStack.shift();
+      redoStack = [];
+      updateHistoryButtons();
+    }
+
+    function undo() {
+      if (historyStack.length <= 1) return;
+      const current = historyStack.pop();
+      redoStack.push(current);
+      state = JSON.parse(historyStack[historyStack.length - 1]);
+      updateHistoryButtons();
+      syncAllViews(true);
+      showToast('Cambio deshecho');
+    }
+
+    function redo() {
+      if (redoStack.length === 0) return;
+      const next = redoStack.pop();
+      historyStack.push(next);
+      state = JSON.parse(next);
+      updateHistoryButtons();
+      syncAllViews(true);
+      showToast('Cambio rehecho');
+    }
+
+    function updateHistoryButtons() {
+      document.getElementById('btnUndo').disabled = historyStack.length <= 1;
+      document.getElementById('btnRedo').disabled = redoStack.length === 0;
+    }
+
+    // ============================================================================
+    // PRISMA PARSER (schema.prisma -> internal ERD state)
+    // ============================================================================
+    function parsePrismaSchema(code, existingPositions = {}) {
+      let datasourceBlock = state.prismaMeta.datasource;
+      let generatorBlock = state.prismaMeta.generator;
+
+      const dsMatch = code.match(/datasource\s+\w+\s*\{[\s\S]*?\}/);
+      if (dsMatch) datasourceBlock = dsMatch[0].trim();
+
+      const genMatch = code.match(/generator\s+\w+\s*\{[\s\S]*?\}/);
+      if (genMatch) generatorBlock = genMatch[0].trim();
+
+      const enums = [];
+      const enumRegex = /enum\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{([\s\S]*?)\}/g;
+      let match;
+      while ((match = enumRegex.exec(code)) !== null) {
+        const enumName = match[1];
+        const values = match[2]
+          .split(/\r?\n/)
+          .map(l => l.replace(/\/\/.*$/, '').trim())
+          .filter(Boolean);
+        enums.push({ name: enumName, values });
+      }
+
+      const modelBlocks = [];
+      const modelNames = new Set();
+      const modelRegex = /model\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{([\s\S]*?)\}/g;
+      while ((match = modelRegex.exec(code)) !== null) {
+        modelNames.add(match[1]);
+        modelBlocks.push({ name: match[1], body: match[2] });
+      }
+
+      const entities = [];
+      const rawRelationFields = [];
+
+      modelBlocks.forEach((mb, idx) => {
+        const prevPos = existingPositions[mb.name];
+        const col = idx % 3;
+        const row = Math.floor(idx / 3);
+        const entity = {
+          id: mb.name,
+          name: mb.name,
+          tableName: '',
+          x: prevPos ? prevPos.x : 60 + col * 340,
+          y: prevPos ? prevPos.y : 70 + row * 290,
+          color: prevPos && prevPos.color ? prevPos.color : ENTITY_COLORS[idx % ENTITY_COLORS.length],
+          fields: []
+        };
+
+        const compositeIds = new Set();
+        const compositeUniques = new Set();
+
+        const lines = mb.body.split(/\r?\n/);
+        for (let rawLine of lines) {
+          let comment = '';
+          const commentIdx = rawLine.indexOf('//');
+          let line = rawLine;
+          if (commentIdx !== -1) {
+            comment = rawLine.slice(commentIdx + 2).trim();
+            line = rawLine.slice(0, commentIdx);
+          }
+          line = line.trim();
+          if (!line) continue;
+
+          if (line.startsWith('@@')) {
+            const mapMatch = line.match(/@@map\(\s*"([^"]+)"\s*\)/);
+            if (mapMatch) entity.tableName = mapMatch[1];
+
+            const idMatch = line.match(/@@id\(\s*\[([^\]]+)\]/);
+            if (idMatch) {
+              idMatch[1].split(',').map(s => s.trim()).forEach(f => compositeIds.add(f));
+            }
+            const ukMatch = line.match(/@@unique\(\s*\[([^\]]+)\]/);
+            if (ukMatch) {
+              ukMatch[1].split(',').map(s => s.trim()).forEach(f => compositeUniques.add(f));
+            }
+            continue;
+          }
+
+          const fieldMatch = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+([A-Za-z_][A-Za-z0-9_]*)(\[\]|\?)?\s*(.*)$/);
+          if (!fieldMatch) continue;
+
+          const [, fName, fType, fMod, fAttrs] = fieldMatch;
+          const isArray = fMod === '[]';
+          const isNullable = fMod === '?';
+
+          if (modelNames.has(fType)) {
+            let relName = '';
+            let fkFields = [];
+            let refFields = [];
+            let onDelete = '';
+
+            const relAttrMatch = fAttrs.match(/@relation\(([^)]*)\)/);
+            if (relAttrMatch) {
+              const inner = relAttrMatch[1];
+              const nameMatch = inner.match(/(?:name:\s*)?"([^"]+)"/);
+              if (nameMatch) relName = nameMatch[1];
+
+              const fieldsMatch = inner.match(/fields:\s*\[([^\]]+)\]/);
+              if (fieldsMatch) {
+                fkFields = fieldsMatch[1].split(',').map(s => s.trim()).filter(Boolean);
+              }
+
+              const refsMatch = inner.match(/references:\s*\[([^\]]+)\]/);
+              if (refsMatch) {
+                refFields = refsMatch[1].split(',').map(s => s.trim()).filter(Boolean);
+              }
+
+              const onDelMatch = inner.match(/onDelete:\s*([A-Za-z]+)/);
+              if (onDelMatch) onDelete = onDelMatch[1];
+            }
+
+            rawRelationFields.push({
+              modelName: mb.name,
+              fieldName: fName,
+              targetModel: fType,
+              isArray,
+              isNullable,
+              relationName: relName,
+              fields: fkFields,
+              references: refFields,
+              onDelete
+            });
+            continue;
+          }
+
+          const isId = /@id\b/.test(fAttrs);
+          const isUnique = /@unique\b/.test(fAttrs);
+          let defaultValue = '';
+
+          const defStart = fAttrs.indexOf('@default(');
+          if (defStart !== -1) {
+            let depth = 0;
+            let startIdx = defStart + '@default('.length;
+            for (let i = startIdx; i < fAttrs.length; i++) {
+              if (fAttrs[i] === '(') depth++;
+              else if (fAttrs[i] === ')') {
+                if (depth === 0) {
+                  defaultValue = fAttrs.slice(startIdx, i).trim();
+                  break;
+                }
+                depth--;
+              }
+            }
+          }
+
+          entity.fields.push({
+            id: `${mb.name}_${fName}`,
+            name: fName,
+            type: fType,
+            isId,
+            isUnique,
+            isNullable,
+            isArray,
+            isForeignKey: false,
+            defaultValue,
+            comment
+          });
+        }
+
+        entity.fields.forEach(f => {
+          if (compositeIds.has(f.name)) f.isId = true;
+          if (compositeUniques.has(f.name)) f.isUnique = true;
+        });
+
+        entities.push(entity);
+      });
+
+      const entityMap = Object.fromEntries(entities.map(e => [e.name, e]));
+      const relations = [];
+      const consumedVirtualFields = new Set();
+
+      rawRelationFields.forEach((rf, idx) => {
+        if (rf.fields.length > 0 && rf.references.length > 0) {
+          consumedVirtualFields.add(idx);
+          const fkEntity = entityMap[rf.modelName];
+          const pkEntity = entityMap[rf.targetModel];
+          if (!fkEntity || !pkEntity) return;
+
+          const fkFieldName = rf.fields[0];
+          const pkFieldName = rf.references[0];
+
+          const fkFieldObj = fkEntity.fields.find(f => f.name === fkFieldName);
+          if (fkFieldObj) fkFieldObj.isForeignKey = true;
+
+          const inverseIdx = rawRelationFields.findIndex((other, oIdx) =>
+            !consumedVirtualFields.has(oIdx) &&
+            other.modelName === rf.targetModel &&
+            other.targetModel === rf.modelName &&
+            (!rf.relationName || !other.relationName || rf.relationName === other.relationName)
+          );
+
+          let inverseField = null;
+          if (inverseIdx !== -1) {
+            inverseField = rawRelationFields[inverseIdx];
+            consumedVirtualFields.add(inverseIdx);
+          }
+
+          const isFkNullable = fkFieldObj ? fkFieldObj.isNullable : rf.isNullable;
+          const sourceCard = isFkNullable ? '|o' : '||';
+
+          const isOneToOne = (fkFieldObj && (fkFieldObj.isUnique || fkFieldObj.isId)) ||
+                             (inverseField && !inverseField.isArray);
+          let targetCard = 'o{';
+          if (isOneToOne) {
+            targetCard = (inverseField && !inverseField.isNullable) ? '||' : '|o';
+          } else {
+            targetCard = 'o{';
+          }
+
+          relations.push({
+            id: `rel_${relations.length + 1}`,
+            name: rf.relationName || rf.fieldName,
+            sourceEntity: pkEntity.name,
+            sourceField: pkFieldName,
+            targetEntity: fkEntity.name,
+            targetField: fkFieldName,
+            sourceCardinality: sourceCard,
+            targetCardinality: targetCard,
+            identifying: !isFkNullable,
+            onDelete: rf.onDelete || ''
+          });
+        }
+      });
+
+      rawRelationFields.forEach((rf, idx) => {
+        if (consumedVirtualFields.has(idx)) return;
+        consumedVirtualFields.add(idx);
+
+        const entityA = entityMap[rf.modelName];
+        const entityB = entityMap[rf.targetModel];
+        if (!entityA || !entityB) return;
+
+        const inverseIdx = rawRelationFields.findIndex((other, oIdx) =>
+          !consumedVirtualFields.has(oIdx) &&
+          other.modelName === rf.targetModel &&
+          other.targetModel === rf.modelName &&
+          (!rf.relationName || !other.relationName || rf.relationName === other.relationName)
+        );
+
+        let inverse = null;
+        if (inverseIdx !== -1) {
+          inverse = rawRelationFields[inverseIdx];
+          consumedVirtualFields.add(inverseIdx);
+        }
+
+        const pkA = (entityA.fields.find(f => f.isId) || entityA.fields[0] || { name: 'id' }).name;
+        const pkB = (entityB.fields.find(f => f.isId) || entityB.fields[0] || { name: 'id' }).name;
+
+        const isManyA = inverse ? inverse.isArray : false;
+        const isManyB = rf.isArray;
+
+        relations.push({
+          id: `rel_${relations.length + 1}`,
+          name: rf.relationName || rf.fieldName,
+          sourceEntity: entityA.name,
+          sourceField: pkA,
+          targetEntity: entityB.name,
+          targetField: pkB,
+          sourceCardinality: isManyA ? 'o{' : '||',
+          targetCardinality: isManyB ? 'o{' : '|o',
+          identifying: true,
+          onDelete: rf.onDelete || ''
+        });
+      });
+
+      return {
+        entities,
+        enums,
+        relations,
+        prismaMeta: {
+          datasource: datasourceBlock,
+          generator: generatorBlock
+        }
+      };
+    }
+
+    // ============================================================================
+    // PRISMA GENERATOR (internal ERD state -> schema.prisma)
+    // ============================================================================
+    function generatePrismaSchema(modelState) {
+      const blocks = [];
+
+      if (modelState.prismaMeta?.datasource) {
+        blocks.push(modelState.prismaMeta.datasource.trim());
+      }
+      if (modelState.prismaMeta?.generator) {
+        blocks.push(modelState.prismaMeta.generator.trim());
+      }
+
+      (modelState.enums || []).forEach(en => {
+        const vals = en.values.map(v => `  ${v}`).join('\n');
+        blocks.push(`enum ${en.name} {\n${vals}\n}`);
+      });
+
+      (modelState.entities || []).forEach(entity => {
+        const lines = [];
+
+        entity.fields.forEach(f => {
+          const mod = f.isArray ? '[]' : (f.isNullable ? '?' : '');
+          const prismaType = f.type === 'UUID' ? 'String' : f.type;
+          const attrs = [];
+          if (f.isId) attrs.push('@id');
+          if (f.isUnique && !f.isId) attrs.push('@unique');
+          if (f.defaultValue) {
+            attrs.push(`@default(${f.defaultValue})`);
+          } else if (f.type === 'UUID' && f.isId) {
+            attrs.push('@default(uuid())');
+          }
+          const attrStr = attrs.length > 0 ? ' ' + attrs.join(' ') : '';
+          const commentStr = f.comment ? ` // ${f.comment}` : '';
+          lines.push(`  ${f.name.padEnd(12)} ${(prismaType + mod).padEnd(10)}${attrStr}${commentStr}`.trimEnd());
+        });
+
+        const incomingRels = modelState.relations.filter(r => r.targetEntity === entity.name);
+        const outgoingRels = modelState.relations.filter(r => r.sourceEntity === entity.name);
+
+        const pairCounts = {};
+        modelState.relations.forEach(r => {
+          const key = [r.sourceEntity, r.targetEntity].sort().join('::');
+          pairCounts[key] = (pairCounts[key] || 0) + 1;
+        });
+
+        incomingRels.forEach(r => {
+          const isManyToMany = (r.sourceCardinality.includes('{') && r.targetCardinality.includes('{'));
+          if (isManyToMany && r.sourceEntity !== r.targetEntity) {
+            const fieldName = camelCase(pluralize(r.sourceEntity));
+            lines.push(`  ${fieldName.padEnd(12)} ${r.sourceEntity}[]`);
+            return;
+          }
+
+          const fkField = entity.fields.find(f => f.name === r.targetField);
+          const isOptional = fkField ? fkField.isNullable : (r.sourceCardinality === '|o');
+          const baseName = r.name && !r.name.includes(' ') && r.name.toLowerCase() !== r.targetEntity.toLowerCase()
+            ? camelCase(r.name)
+            : camelCase(r.sourceEntity);
+
+          const safeFieldName = entity.fields.some(f => f.name === baseName)
+            ? `${baseName}Ref`
+            : baseName;
+
+          const pairKey = [r.sourceEntity, r.targetEntity].sort().join('::');
+          const needsRelName = pairCounts[pairKey] > 1 && r.name;
+
+          const relParts = [];
+          if (needsRelName) relParts.push(`"${r.name}"`);
+          relParts.push(`fields: [${r.targetField}]`);
+          relParts.push(`references: [${r.sourceField}]`);
+          if (r.onDelete) relParts.push(`onDelete: ${r.onDelete}`);
+
+          lines.push(`  ${safeFieldName.padEnd(12)} ${r.sourceEntity}${isOptional ? '?' : ''} @relation(${relParts.join(', ')})`);
+        });
+
+        outgoingRels.forEach(r => {
+          const isOneToOne = r.targetCardinality === '||' || r.targetCardinality === '|o';
+          const baseInverseName = isOneToOne
+            ? camelCase(r.targetEntity)
+            : camelCase(pluralize(r.targetEntity));
+
+          const pairKey = [r.sourceEntity, r.targetEntity].sort().join('::');
+          const needsRelName = pairCounts[pairKey] > 1 && r.name;
+
+          const suffixName = needsRelName ? `${baseInverseName}_${camelCase(r.name)}` : baseInverseName;
+          const safeInverseName = entity.fields.some(f => f.name === suffixName)
+            ? `${suffixName}List`
+            : suffixName;
+
+          const typeMod = isOneToOne ? '?' : '[]';
+          const relAttr = needsRelName ? ` @relation("${r.name}")` : '';
+          lines.push(`  ${safeInverseName.padEnd(12)} ${r.targetEntity}${typeMod}${relAttr}`);
+        });
+
+        if (entity.tableName) {
+          lines.push(`\n  @@map("${entity.tableName}")`);
+        }
+
+        blocks.push(`model ${entity.name} {\n${lines.join('\n')}\n}`);
+      });
+
+      return blocks.join('\n\n') + '\n';
+    }
+
+    // ============================================================================
+    // MERMAID PARSER & GENERATOR
+    // ============================================================================
+    function parseMermaidER(code, existingPositions = {}) {
+      const lines = code.split(/\r?\n/);
+      const entitiesMap = {};
+      const rawRelations = [];
+
+      let currentEntity = null;
+      let entityIndex = 0;
+
+      const ensureEntity = (rawName) => {
+        const name = rawName.replace(/^["']|["']$/g, '').trim();
+        if (!entitiesMap[name]) {
+          const prevPos = existingPositions[name];
+          const col = entityIndex % 3;
+          const row = Math.floor(entityIndex / 3);
+          entitiesMap[name] = {
+            id: name,
+            name,
+            tableName: '',
+            x: prevPos ? prevPos.x : 60 + col * 340,
+            y: prevPos ? prevPos.y : 70 + row * 290,
+            color: prevPos && prevPos.color ? prevPos.color : ENTITY_COLORS[entityIndex % ENTITY_COLORS.length],
+            fields: []
+          };
+          entityIndex++;
+        }
+        return entitiesMap[name];
+      };
+
+      const normalizeCard = (token) => {
+        const t = token.trim();
+        if (t === '||') return '||';
+        if (t === '|o' || t === 'o|') return '|o';
+        if (t === '|{' || t === '}|') return '|{';
+        if (t === 'o{' || t === '}o') return 'o{';
+        return 'o{';
+      };
+
+      const normalizeMermaidType = (rawType) => {
+        const lower = rawType.toLowerCase();
+        if (lower === 'int' || lower === 'integer' || lower === 'serial') return 'Int';
+        if (lower === 'string' || lower === 'varchar' || lower === 'text') return 'String';
+        if (lower === 'bool' || lower === 'boolean') return 'Boolean';
+        if (lower === 'datetime' || lower === 'timestamp' || lower === 'date') return 'DateTime';
+        if (lower === 'float' || lower === 'double') return 'Float';
+        if (lower === 'decimal' || lower === 'numeric' || lower === 'money') return 'Decimal';
+        if (lower === 'json' || lower === 'jsonb') return 'Json';
+        if (lower === 'uuid') return 'UUID';
+        return rawType;
+      };
+
+      for (let rawLine of lines) {
+        const line = rawLine.replace(/%%.*$/, '').trim();
+        if (!line || /^erDiagram\b/i.test(line)) continue;
+
+        if (currentEntity) {
+          if (line === '}') {
+            currentEntity = null;
+            continue;
+          }
+          const attrMatch = line.match(/^([^\s]+)\s+([^\s]+)(?:\s+([^"]+))?(?:\s*"([^"]*)")?$/);
+          if (attrMatch) {
+            const [, rawType, rawName, rawKeys, rawComment] = attrMatch;
+            const keysStr = (rawKeys || '').toUpperCase();
+            const isNullable = rawName.endsWith('?') || rawType.endsWith('?');
+            const cleanName = rawName.replace(/\?$/, '');
+            const cleanType = normalizeMermaidType(rawType.replace(/\?$/, ''));
+
+            currentEntity.fields.push({
+              id: `${currentEntity.name}_${cleanName}`,
+              name: cleanName,
+              type: cleanType,
+              isId: /\bPK\b/.test(keysStr),
+              isForeignKey: /\bFK\b/.test(keysStr),
+              isUnique: /\bUK\b/.test(keysStr),
+              isNullable,
+              isArray: false,
+              defaultValue: /\bPK\b/.test(keysStr) && cleanType === 'Int' ? 'autoincrement()' : '',
+              comment: (rawComment || '').trim()
+            });
+          }
+          continue;
+        }
+
+        const blockOpenMatch = line.match(/^([A-Za-z0-9_-]+|"[^"]+")\s*\{\s*$/);
+        if (blockOpenMatch) {
+          currentEntity = ensureEntity(blockOpenMatch[1]);
+          continue;
+        }
+
+        const emptyBlockMatch = line.match(/^([A-Za-z0-9_-]+|"[^"]+")\s*\{\s*\}\s*$/);
+        if (emptyBlockMatch) {
+          ensureEntity(emptyBlockMatch[1]);
+          continue;
+        }
+
+        const relMatch = line.match(/^([A-Za-z0-9_-]+|"[^"]+")\s*(\|\||\|o|o\||\}\||\|\{|\}o|o\{)\s*(--|\.\.)\s*(\|\||\|o|o\||\}\||\|\{|\}o|o\{)\s*([A-Za-z0-9_-]+|"[^"]+")\s*(?::\s*(.+))?$/);
+        if (relMatch) {
+          const [, srcRaw, srcCardRaw, lineStyle, tgtCardRaw, tgtRaw, labelRaw] = relMatch;
+          const srcEntity = ensureEntity(srcRaw);
+          const tgtEntity = ensureEntity(tgtRaw);
+          const label = (labelRaw || '').replace(/^["']|["']$/g, '').trim();
+
+          rawRelations.push({
+            sourceEntity: srcEntity.name,
+            targetEntity: tgtEntity.name,
+            sourceCardinality: normalizeCard(srcCardRaw),
+            targetCardinality: normalizeCard(tgtCardRaw),
+            identifying: lineStyle === '--',
+            name: label || 'relación'
+          });
+        }
+      }
+
+      const entities = Object.values(entitiesMap);
+      entities.forEach(ent => {
+        if (ent.fields.length === 0) {
+          ent.fields.push({
+            id: `${ent.name}_id`,
+            name: 'id',
+            type: 'Int',
+            isId: true,
+            isUnique: false,
+            isNullable: false,
+            isArray: false,
+            isForeignKey: false,
+            defaultValue: 'autoincrement()',
+            comment: ''
+          });
+        }
+      });
+
+      const relations = rawRelations.map((r, idx) => {
+        const srcEnt = entitiesMap[r.sourceEntity];
+        const tgtEnt = entitiesMap[r.targetEntity];
+        const srcPkField = srcEnt.fields.find(f => f.isId) || srcEnt.fields[0];
+
+        const lowerSrc = r.sourceEntity.toLowerCase();
+        let tgtFkField = tgtEnt.fields.find(f =>
+          f.isForeignKey && f.name.toLowerCase().includes(lowerSrc)
+        );
+        if (!tgtFkField) {
+          tgtFkField = tgtEnt.fields.find(f => f.name.toLowerCase() === `${lowerSrc}id` || f.name.toLowerCase() === `${lowerSrc}_id`);
+        }
+        if (!tgtFkField) {
+          tgtFkField = tgtEnt.fields.find(f => f.isForeignKey);
+        }
+
+        if (!tgtFkField) {
+          const autoFkName = `${camelCase(r.sourceEntity)}Id`;
+          tgtFkField = {
+            id: `${tgtEnt.name}_${autoFkName}`,
+            name: autoFkName,
+            type: srcPkField ? srcPkField.type : 'Int',
+            isId: false,
+            isUnique: r.targetCardinality === '||' || r.targetCardinality === '|o',
+            isNullable: r.sourceCardinality === '|o',
+            isArray: false,
+            isForeignKey: true,
+            defaultValue: '',
+            comment: ''
+          };
+          tgtEnt.fields.push(tgtFkField);
+        } else {
+          tgtFkField.isForeignKey = true;
+        }
+
+        return {
+          id: `rel_${idx + 1}`,
+          name: r.name,
+          sourceEntity: r.sourceEntity,
+          sourceField: srcPkField.name,
+          targetEntity: r.targetEntity,
+          targetField: tgtFkField.name,
+          sourceCardinality: r.sourceCardinality,
+          targetCardinality: r.targetCardinality,
+          identifying: r.identifying,
+          onDelete: r.identifying ? 'Cascade' : ''
+        };
+      });
+
+      return {
+        entities,
+        enums: state.enums || [],
+        relations,
+        prismaMeta: state.prismaMeta
+      };
+    }
+
+    function generateMermaidER(modelState) {
+      const lines = ['erDiagram'];
+
+      (modelState.relations || []).forEach(r => {
+        const leftCard = r.sourceCardinality || '||';
+        const rightCard = r.targetCardinality || 'o{';
+        const lineToken = r.identifying === false ? '..' : '--';
+        const label = (r.name || 'relación').replace(/"/g, "'");
+        lines.push(`    ${r.sourceEntity} ${leftCard}${lineToken}${rightCard} ${r.targetEntity} : "${label}"`);
+      });
+
+      if (modelState.relations.length > 0 && modelState.entities.length > 0) {
+        lines.push('');
+      }
+
+      (modelState.entities || []).forEach((ent, idx) => {
+        lines.push(`    ${ent.name} {`);
+        ent.fields.forEach(f => {
+          const mType = f.type.toLowerCase();
+          const keyBadges = [];
+          if (f.isId) keyBadges.push('PK');
+          if (f.isForeignKey) keyBadges.push('FK');
+          if (f.isUnique && !f.isId) keyBadges.push('UK');
+
+          const keyStr = keyBadges.length > 0 ? ` ${keyBadges.join(',')}` : '';
+          const commentParts = [];
+          if (f.isNullable) commentParts.push('nullable');
+          if (f.comment) commentParts.push(f.comment);
+          const commentStr = commentParts.length > 0 ? ` "${commentParts.join(' - ')}"` : '';
+
+          lines.push(`        ${mType} ${f.name}${keyStr}${commentStr}`);
+        });
+        lines.push('    }');
+        if (idx < modelState.entities.length - 1) lines.push('');
+      });
+
+      return lines.join('\n') + '\n';
+    }
+
+    // ============================================================================
+    // SQL DDL GENERATOR & PARSER (PostgreSQL & MySQL)
+    // ============================================================================
+    function generateSqlDDL(modelState, dialect = 'postgresql') {
+      const isPg = dialect === 'postgresql';
+      const q = (ident) => isPg ? `"${ident}"` : `\`${ident}\``;
+      const enumMap = Object.fromEntries((modelState.enums || []).map(e => [e.name, e.values]));
+      const blocks = [];
+
+      blocks.push(`-- ============================================================`);
+      blocks.push(`-- SQL DDL generado por ERD Studio (${isPg ? 'PostgreSQL' : 'MySQL / MariaDB'})`);
+      blocks.push(`-- ============================================================`);
+
+      // PostgreSQL CREATE TYPE for Enums
+      if (isPg && (modelState.enums || []).length > 0) {
+        modelState.enums.forEach(en => {
+          const vals = en.values.map(v => `'${v}'`).join(', ');
+          blocks.push(`CREATE TYPE ${q(en.name)} AS ENUM (${vals});`);
+        });
+      }
+
+      // CREATE TABLE statements
+      (modelState.entities || []).forEach(ent => {
+        const tableName = ent.tableName || ent.name;
+        const colLines = [];
+        const pkFields = ent.fields.filter(f => f.isId).map(f => f.name);
+
+        ent.fields.forEach(f => {
+          let sqlType = 'VARCHAR(255)';
+          const isAutoInc = f.defaultValue && f.defaultValue.includes('autoincrement');
+
+          if (enumMap[f.type]) {
+            if (isPg) {
+              sqlType = q(f.type);
+            } else {
+              sqlType = `ENUM(${enumMap[f.type].map(v => `'${v}'`).join(', ')})`;
+            }
+          } else {
+            switch (f.type) {
+              case 'Int':
+                sqlType = (isPg && isAutoInc) ? 'SERIAL' : 'INT';
+                break;
+              case 'BigInt':
+                sqlType = (isPg && isAutoInc) ? 'BIGSERIAL' : 'BIGINT';
+                break;
+              case 'String':
+                sqlType = 'VARCHAR(255)';
+                break;
+              case 'Boolean':
+                sqlType = 'BOOLEAN';
+                break;
+              case 'DateTime':
+                sqlType = isPg ? 'TIMESTAMP WITH TIME ZONE' : 'DATETIME';
+                break;
+              case 'Float':
+                sqlType = isPg ? 'DOUBLE PRECISION' : 'DOUBLE';
+                break;
+              case 'Decimal':
+                sqlType = 'DECIMAL(12, 2)';
+                break;
+              case 'Json':
+                sqlType = isPg ? 'JSONB' : 'JSON';
+                break;
+              case 'UUID':
+                sqlType = isPg ? 'UUID' : 'CHAR(36)';
+                break;
+              case 'Bytes':
+                sqlType = isPg ? 'BYTEA' : 'BLOB';
+                break;
+              default:
+                sqlType = 'VARCHAR(255)';
+            }
+          }
+
+          if (f.isArray && isPg) sqlType += '[]';
+
+          const parts = [`  ${q(f.name)} ${sqlType}`];
+          if (!isPg && isAutoInc && (f.type === 'Int' || f.type === 'BigInt')) {
+            parts.push('AUTO_INCREMENT');
+          }
+          if (!f.isNullable && !f.isId) {
+            parts.push('NOT NULL');
+          } else if (f.isId) {
+            parts.push('NOT NULL');
+          }
+          if (f.isUnique && !f.isId) {
+            parts.push('UNIQUE');
+          }
+
+          // Default value translation
+          if (f.defaultValue && !isAutoInc) {
+            const dv = f.defaultValue.trim();
+            if (dv === 'now()') {
+              parts.push('DEFAULT CURRENT_TIMESTAMP');
+            } else if (dv === 'uuid()' || dv === 'cuid()') {
+              if (isPg) parts.push('DEFAULT gen_random_uuid()');
+            } else if (dv === 'true' || dv === 'false') {
+              parts.push(`DEFAULT ${dv.toUpperCase()}`);
+            } else if (/^-?\d+(\.\d+)?$/.test(dv)) {
+              parts.push(`DEFAULT ${dv}`);
+            } else {
+              const cleanStr = dv.replace(/^["']|["']$/g, '');
+              parts.push(`DEFAULT '${cleanStr}'`);
+            }
+          }
+
+          colLines.push(parts.join(' '));
+        });
+
+        if (pkFields.length > 0) {
+          colLines.push(`  PRIMARY KEY (${pkFields.map(q).join(', ')})`);
+        }
+
+        blocks.push(`CREATE TABLE ${q(tableName)} (\n${colLines.join(',\n')}\n);`);
+      });
+
+      // ALTER TABLE Foreign Keys
+      const entityMap = Object.fromEntries((modelState.entities || []).map(e => [e.name, e]));
+      const fkLines = [];
+      (modelState.relations || []).forEach(r => {
+        const srcEnt = entityMap[r.sourceEntity];
+        const tgtEnt = entityMap[r.targetEntity];
+        if (!srcEnt || !tgtEnt) return;
+
+        const srcTable = srcEnt.tableName || srcEnt.name;
+        const tgtTable = tgtEnt.tableName || tgtEnt.name;
+        const constraintName = `fk_${tgtTable}_${r.targetField}`;
+
+        let onDeleteClause = '';
+        if (r.onDelete === 'Cascade') onDeleteClause = ' ON DELETE CASCADE';
+        else if (r.onDelete === 'SetNull') onDeleteClause = ' ON DELETE SET NULL';
+        else if (r.onDelete === 'Restrict') onDeleteClause = ' ON DELETE RESTRICT';
+        else if (r.onDelete === 'NoAction') onDeleteClause = ' ON DELETE NO ACTION';
+
+        fkLines.push(
+          `ALTER TABLE ${q(tgtTable)} ADD CONSTRAINT ${q(constraintName)} FOREIGN KEY (${q(r.targetField)}) REFERENCES ${q(srcTable)} (${q(r.sourceField)})${onDeleteClause};`
+        );
+      });
+
+      if (fkLines.length > 0) {
+        blocks.push(`-- Claves Foráneas (Relaciones)\n${fkLines.join('\n')}`);
+      }
+
+      return blocks.join('\n\n') + '\n';
+    }
+
+    function parseSqlDDL(code, existingPositions = {}) {
+      const clean = code
+        .replace(/--.*$/gm, '')
+        .replace(/\/\*[\s\S]*?\*\//g, '');
+
+      const enums = [];
+      const pgEnumRegex = /CREATE\s+TYPE\s+["`]?([A-Za-z0-9_]+)["`]?\s+AS\s+ENUM\s*\(([^)]+)\)/gi;
+      let match;
+      while ((match = pgEnumRegex.exec(clean)) !== null) {
+        const name = match[1];
+        const values = match[2].split(',').map(s => s.replace(/['"\s]/g, '')).filter(Boolean);
+        enums.push({ name, values });
+      }
+
+      const entities = [];
+      const tableToEntityMap = {};
+      const rawRelations = [];
+
+      const createTableRegex = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?([A-Za-z0-9_]+)["`]?\s*\(([\s\S]*?)\)\s*;/gi;
+      let idx = 0;
+
+      while ((match = createTableRegex.exec(clean)) !== null) {
+        const rawTableName = match[1];
+        const body = match[2];
+        const prevPos = existingPositions[rawTableName];
+        const col = idx % 3;
+        const row = Math.floor(idx / 3);
+
+        const entity = {
+          id: rawTableName,
+          name: rawTableName,
+          tableName: '',
+          x: prevPos ? prevPos.x : 60 + col * 340,
+          y: prevPos ? prevPos.y : 70 + row * 290,
+          color: prevPos && prevPos.color ? prevPos.color : ENTITY_COLORS[idx % ENTITY_COLORS.length],
+          fields: []
+        };
+        idx++;
+
+        // Split top-level comma-separated definitions inside CREATE TABLE
+        const defs = [];
+        let current = '';
+        let depth = 0;
+        for (let ch of body) {
+          if (ch === '(') depth++;
+          else if (ch === ')') depth = Math.max(0, depth - 1);
+          if (ch === ',' && depth === 0) {
+            defs.push(current.trim());
+            current = '';
+          } else {
+            current += ch;
+          }
+        }
+        if (current.trim()) defs.push(current.trim());
+
+        const pkSet = new Set();
+
+        defs.forEach(def => {
+          const upper = def.toUpperCase();
+          if (/^(?:CONSTRAINT\s+["`]?[A-Za-z0-9_]+["`]?\s+)?PRIMARY\s+KEY/i.test(def)) {
+            const pkMatch = def.match(/PRIMARY\s+KEY\s*\(([^)]+)\)/i);
+            if (pkMatch) {
+              pkMatch[1].split(',').map(s => s.replace(/["`\s]/g, '')).forEach(c => pkSet.add(c));
+            }
+            return;
+          }
+
+          if (/^(?:CONSTRAINT\s+["`]?[A-Za-z0-9_]+["`]?\s+)?FOREIGN\s+KEY/i.test(def)) {
+            const fkMatch = def.match(/FOREIGN\s+KEY\s*\(\s*["`]?([A-Za-z0-9_]+)["`]?\s*\)\s*REFERENCES\s+["`]?([A-Za-z0-9_]+)["`]?\s*\(\s*["`]?([A-Za-z0-9_]+)["`]?\s*\)(.*)$/i);
+            if (fkMatch) {
+              const [, fkCol, refTable, refCol, tail] = fkMatch;
+              let onDelete = '';
+              if (/ON\s+DELETE\s+CASCADE/i.test(tail)) onDelete = 'Cascade';
+              else if (/ON\s+DELETE\s+SET\s+NULL/i.test(tail)) onDelete = 'SetNull';
+              else if (/ON\s+DELETE\s+RESTRICT/i.test(tail)) onDelete = 'Restrict';
+              rawRelations.push({
+                sourceTable: refTable,
+                sourceField: refCol,
+                targetTable: rawTableName,
+                targetField: fkCol,
+                onDelete
+              });
+            }
+            return;
+          }
+
+          if (/^(?:CONSTRAINT|UNIQUE|INDEX|KEY|CHECK)\b/i.test(def)) return;
+
+          const colMatch = def.match(/^["`]?([A-Za-z0-9_]+)["`]?\s+([A-Za-z0-9_]+(?:\s*\([^)]*\))?)\s*(.*)$/i);
+          if (!colMatch) return;
+
+          const [, colName, rawSqlType, colTail] = colMatch;
+          const upperType = rawSqlType.toUpperCase();
+          const upperTail = colTail.toUpperCase();
+
+          let prismaType = 'String';
+          if (upperType.startsWith('ENUM(')) {
+            const enumName = `${rawTableName}_${colName}_enum`;
+            const inner = rawSqlType.slice(rawSqlType.indexOf('(') + 1, rawSqlType.lastIndexOf(')'));
+            const vals = inner.split(',').map(s => s.replace(/['"\s]/g, '')).filter(Boolean);
+            enums.push({ name: enumName, values: vals });
+            prismaType = enumName;
+          } else if (enums.some(e => e.name.toLowerCase() === rawSqlType.replace(/["`]/g, '').toLowerCase())) {
+            const foundEnum = enums.find(e => e.name.toLowerCase() === rawSqlType.replace(/["`]/g, '').toLowerCase());
+            prismaType = foundEnum.name;
+          } else if (upperType.includes('SERIAL') || upperType.startsWith('INT') || upperType.startsWith('SMALLINT') || upperType.startsWith('TINYINT')) {
+            prismaType = 'Int';
+          } else if (upperType.includes('BIGINT') || upperType.includes('BIGSERIAL')) {
+            prismaType = 'BigInt';
+          } else if (upperType.startsWith('BOOL')) {
+            prismaType = 'Boolean';
+          } else if (upperType.startsWith('TIMESTAMP') || upperType.startsWith('DATE') || upperType.startsWith('TIME')) {
+            prismaType = 'DateTime';
+          } else if (upperType.startsWith('DECIMAL') || upperType.startsWith('NUMERIC')) {
+            prismaType = 'Decimal';
+          } else if (upperType.startsWith('FLOAT') || upperType.startsWith('DOUBLE') || upperType.startsWith('REAL')) {
+            prismaType = 'Float';
+          } else if (upperType.startsWith('JSON')) {
+            prismaType = 'Json';
+          } else if (upperType.startsWith('UUID') || upperType === 'CHAR(36)') {
+            prismaType = 'UUID';
+          }
+
+          const isId = upperTail.includes('PRIMARY KEY');
+          const isUnique = upperTail.includes('UNIQUE');
+          const isNotNull = upperTail.includes('NOT NULL') || isId || upperType.includes('SERIAL');
+          const isAuto = upperType.includes('SERIAL') || upperTail.includes('AUTO_INCREMENT');
+
+          // Inline REFERENCES check
+          const inlineRef = colTail.match(/REFERENCES\s+["`]?([A-Za-z0-9_]+)["`]?\s*\(\s*["`]?([A-Za-z0-9_]+)["`]?\s*\)(.*)$/i);
+          if (inlineRef) {
+            const [, refTable, refCol, refTail] = inlineRef;
+            let onDelete = '';
+            if (/ON\s+DELETE\s+CASCADE/i.test(refTail)) onDelete = 'Cascade';
+            else if (/ON\s+DELETE\s+SET\s+NULL/i.test(refTail)) onDelete = 'SetNull';
+            rawRelations.push({
+              sourceTable: refTable,
+              sourceField: refCol,
+              targetTable: rawTableName,
+              targetField: colName,
+              onDelete
+            });
+          }
+
+          entity.fields.push({
+            id: `${rawTableName}_${colName}`,
+            name: colName,
+            type: prismaType,
+            isId,
+            isUnique,
+            isNullable: !isNotNull,
+            isArray: false,
+            isForeignKey: Boolean(inlineRef),
+            defaultValue: isAuto ? 'autoincrement()' : (upperTail.includes('CURRENT_TIMESTAMP') ? 'now()' : ''),
+            comment: ''
+          });
+        });
+
+        entity.fields.forEach(f => {
+          if (pkSet.has(f.name)) {
+            f.isId = true;
+            f.isNullable = false;
+          }
+        });
+
+        entities.push(entity);
+        tableToEntityMap[rawTableName] = entity;
+      }
+
+      // Parse standalone ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY statements
+      const alterFkRegex = /ALTER\s+TABLE\s+(?:ONLY\s+)?["`]?([A-Za-z0-9_]+)["`]?\s+ADD\s+(?:CONSTRAINT\s+["`]?[A-Za-z0-9_]+["`]?\s+)?FOREIGN\s+KEY\s*\(\s*["`]?([A-Za-z0-9_]+)["`]?\s*\)\s*REFERENCES\s+["`]?([A-Za-z0-9_]+)["`]?\s*\(\s*["`]?([A-Za-z0-9_]+)["`]?\s*\)(.*?);/gi;
+      while ((match = alterFkRegex.exec(clean)) !== null) {
+        const [, tgtTable, fkCol, srcTable, pkCol, tail] = match;
+        let onDelete = '';
+        if (/ON\s+DELETE\s+CASCADE/i.test(tail)) onDelete = 'Cascade';
+        else if (/ON\s+DELETE\s+SET\s+NULL/i.test(tail)) onDelete = 'SetNull';
+        else if (/ON\s+DELETE\s+RESTRICT/i.test(tail)) onDelete = 'Restrict';
+
+        rawRelations.push({
+          sourceTable: srcTable,
+          sourceField: pkCol,
+          targetTable: tgtTable,
+          targetField: fkCol,
+          onDelete
+        });
+      }
+
+      const relations = [];
+      rawRelations.forEach((rr, i) => {
+        const srcEnt = tableToEntityMap[rr.sourceTable];
+        const tgtEnt = tableToEntityMap[rr.targetTable];
+        if (!srcEnt || !tgtEnt) return;
+
+        const fkFieldObj = tgtEnt.fields.find(f => f.name === rr.targetField);
+        if (fkFieldObj) fkFieldObj.isForeignKey = true;
+
+        const isNullable = fkFieldObj ? fkFieldObj.isNullable : false;
+        const isOneToOne = fkFieldObj ? (fkFieldObj.isUnique || fkFieldObj.isId) : false;
+
+        relations.push({
+          id: `rel_${i + 1}`,
+          name: camelCase(srcEnt.name),
+          sourceEntity: srcEnt.name,
+          sourceField: rr.sourceField,
+          targetEntity: tgtEnt.name,
+          targetField: rr.targetField,
+          sourceCardinality: isNullable ? '|o' : '||',
+          targetCardinality: isOneToOne ? '|o' : 'o{',
+          identifying: !isNullable,
+          onDelete: rr.onDelete || ''
+        });
+      });
+
+      return {
+        entities,
+        enums: enums.length > 0 ? enums : (state.enums || []),
+        relations,
+        prismaMeta: state.prismaMeta
+      };
+    }
+
+    // ============================================================================
+    // SCHEMA VALIDATION ENGINE (PRISMA & ERD RULES)
+    // ============================================================================
+    function runSchemaValidation() {
+      const diagnostics = [];
+      const entityMap = Object.fromEntries(state.entities.map(e => [e.name, e]));
+      const connectedEntities = new Set();
+
+      state.relations.forEach(r => {
+        connectedEntities.add(r.sourceEntity);
+        connectedEntities.add(r.targetEntity);
+      });
+
+      state.entities.forEach(ent => {
+        // Rule 1: Missing Primary Key (@id / PK)
+        const hasPk = ent.fields.some(f => f.isId);
+        if (!hasPk) {
+          diagnostics.push({
+            id: `no_pk_${ent.name}`,
+            severity: 'error',
+            title: `La entidad "${ent.name}" no tiene clave primaria (@id / PK)`,
+            description: 'Prisma requiere al menos un campo con @id o @@id en cada modelo.',
+            entityId: ent.id,
+            fixLabel: 'Marcar primer campo como PK',
+            fixFn: () => {
+              if (ent.fields.length > 0) {
+                ent.fields[0].isId = true;
+                ent.fields[0].isNullable = false;
+              } else {
+                ent.fields.unshift({
+                  id: `${ent.name}_id`,
+                  name: 'id',
+                  type: 'Int',
+                  isId: true,
+                  isUnique: false,
+                  isNullable: false,
+                  isArray: false,
+                  isForeignKey: false,
+                  defaultValue: 'autoincrement()',
+                  comment: ''
+                });
+              }
+            }
+          });
+        }
+
+        // Rule 2: Duplicate field names within same entity
+        const seenFields = new Set();
+        ent.fields.forEach((f, idx) => {
+          const lower = f.name.toLowerCase();
+          if (seenFields.has(lower)) {
+            diagnostics.push({
+              id: `dup_field_${ent.name}_${f.name}_${idx}`,
+              severity: 'error',
+              title: `Campo duplicado "${f.name}" en "${ent.name}"`,
+              description: 'Dos columnas no pueden compartir el mismo nombre dentro de la misma tabla.',
+              entityId: ent.id,
+              fixLabel: 'Renombrar campo duplicado',
+              fixFn: () => {
+                f.name = `${f.name}_${idx + 1}`;
+              }
+            });
+          }
+          seenFields.add(lower);
+        });
+
+        // Rule 3: PascalCase naming convention for Prisma models
+        if (!/^[A-Z][A-Za-z0-9_]*$/.test(ent.name)) {
+          const suggested = ent.name.charAt(0).toUpperCase() + ent.name.slice(1);
+          diagnostics.push({
+            id: `pascal_${ent.name}`,
+            severity: 'warn',
+            title: `Convención de nombres en "${ent.name}"`,
+            description: `En Prisma se recomienda PascalCase para los modelos (ej. "${suggested}").`,
+            entityId: ent.id,
+            fixLabel: `Renombrar a ${suggested}`,
+            fixFn: () => {
+              renameEntity(ent.id, suggested);
+            }
+          });
+        }
+
+        // Rule 4: Orphan entity warning (only if more than 1 entity exists)
+        if (state.entities.length > 1 && !connectedEntities.has(ent.name)) {
+          diagnostics.push({
+            id: `orphan_${ent.name}`,
+            severity: 'info',
+            title: `Entidad aislada "${ent.name}"`,
+            description: 'Esta entidad no tiene relaciones entrantes ni salientes en el modelo actual.',
+            entityId: ent.id
+          });
+        }
+      });
+
+      // Relation rules
+      state.relations.forEach(rel => {
+        const srcEnt = entityMap[rel.sourceEntity];
+        const tgtEnt = entityMap[rel.targetEntity];
+        if (!srcEnt || !tgtEnt) return;
+
+        const pkField = srcEnt.fields.find(f => f.name === rel.sourceField);
+        const fkField = tgtEnt.fields.find(f => f.name === rel.targetField);
+
+        // Rule 5: Missing FK column on target entity
+        if (!fkField) {
+          diagnostics.push({
+            id: `missing_fk_${rel.id}`,
+            severity: 'error',
+            title: `Falta el campo FK "${rel.targetField}" en "${tgtEnt.name}"`,
+            description: `La relación "${rel.name}" apunta a un campo "${rel.targetField}" que no existe en "${tgtEnt.name}".`,
+            entityId: tgtEnt.id,
+            fixLabel: `Crear campo ${rel.targetField}`,
+            fixFn: () => {
+              tgtEnt.fields.push({
+                id: `${tgtEnt.name}_${rel.targetField}`,
+                name: rel.targetField,
+                type: pkField ? pkField.type : 'Int',
+                isId: false,
+                isUnique: false,
+                isNullable: rel.sourceCardinality === '|o',
+                isArray: false,
+                isForeignKey: true,
+                defaultValue: '',
+                comment: ''
+              });
+            }
+          });
+          return;
+        }
+
+        // Rule 6: Type mismatch between PK and FK
+        if (pkField && fkField && pkField.type !== fkField.type) {
+          diagnostics.push({
+            id: `type_mismatch_${rel.id}`,
+            severity: 'error',
+            title: `Tipos incompatibles en relación: ${srcEnt.name}.${pkField.name} (${pkField.type}) ↔ ${tgtEnt.name}.${fkField.name} (${fkField.type})`,
+            description: 'En Prisma y SQL, el campo clave foránea (FK) debe tener exactamente el mismo tipo escalar que el campo referenciado (PK).',
+            entityId: tgtEnt.id,
+            fixLabel: `Cambiar ${fkField.name} a ${pkField.type}`,
+            fixFn: () => {
+              fkField.type = pkField.type;
+            }
+          });
+        }
+
+        // Rule 7: Prisma onDelete: SetNull requires nullable FK field
+        if (rel.onDelete === 'SetNull' && !fkField.isNullable) {
+          diagnostics.push({
+            id: `setnull_nonnull_${rel.id}`,
+            severity: 'warn',
+            title: `Conflicto onDelete: SetNull en "${tgtEnt.name}.${fkField.name}"`,
+            description: 'En Prisma y SQL, usar onDelete: SetNull en un campo obligatorio (No-Null) provocará un error de validación.',
+            entityId: tgtEnt.id,
+            fixLabel: `Hacer ${fkField.name} anulable (?)`,
+            fixFn: () => {
+              fkField.isNullable = true;
+              rel.sourceCardinality = '|o';
+            }
+          });
+        }
+
+        // Rule 8: Cardinality |o vs non-null FK synchronization
+        if (rel.sourceCardinality === '|o' && !fkField.isNullable) {
+          diagnostics.push({
+            id: `card_null_${rel.id}`,
+            severity: 'info',
+            title: `Cardinalidad opcional (|o) con FK obligatoria en "${tgtEnt.name}.${fkField.name}"`,
+            description: 'La relación indica que el padre es opcional (0..1), pero el campo FK no admite valores nulos.',
+            entityId: tgtEnt.id,
+            fixLabel: `Permitir Null (?) en ${fkField.name}`,
+            fixFn: () => {
+              fkField.isNullable = true;
+            }
+          });
+        }
+      });
+
+      currentDiagnostics = diagnostics;
+      updateValidationHeaderBadges();
+      if (activeLeftTab === 'validator') {
+        renderValidatorPanel();
+      }
+    }
+
+    function updateValidationHeaderBadges() {
+      const errors = currentDiagnostics.filter(d => d.severity === 'error').length;
+      const warns = currentDiagnostics.filter(d => d.severity === 'warn').length;
+      const totalIssues = errors + warns;
+
+      const tabBadge = document.getElementById('tabValidatorBadge');
+      const headerDot = document.getElementById('headerValidationDot');
+      const headerText = document.getElementById('headerValidationText');
+
+      tabBadge.textContent = String(totalIssues);
+
+      if (errors > 0) {
+        tabBadge.className = 'px-1.5 rounded-full bg-red-500/20 text-red-500 text-xs font-bold';
+        headerDot.className = 'w-2 h-2 rounded-full bg-red-500';
+        headerText.textContent = `${errors} error${errors > 1 ? 'es' : ''}${warns > 0 ? `, ${warns} aviso${warns > 1 ? 's' : ''}` : ''}`;
+      } else if (warns > 0) {
+        tabBadge.className = 'px-1.5 rounded-full bg-amber-500/20 text-amber-500 text-xs font-bold';
+        headerDot.className = 'w-2 h-2 rounded-full bg-amber-500';
+        headerText.textContent = `${warns} advertencia${warns > 1 ? 's' : ''}`;
+      } else {
+        tabBadge.className = 'px-1.5 rounded-full bg-emerald-500/20 text-emerald-500 text-xs font-bold';
+        headerDot.className = 'w-2 h-2 rounded-full bg-emerald-500';
+        headerText.textContent = 'Esquema válido';
+      }
+    }
+
+    function renderValidatorPanel() {
+      const container = document.getElementById('validatorContent');
+      const fixableCount = currentDiagnostics.filter(d => typeof d.fixFn === 'function').length;
+      const btnAutoFixAll = document.getElementById('btnAutoFixAll');
+      btnAutoFixAll.disabled = fixableCount === 0;
+      btnAutoFixAll.className = `px-3 py-1.5 rounded-lg bg-[var(--primary)] text-[var(--primary-foreground)] text-xs font-medium transition ${fixableCount === 0 ? 'opacity-40 cursor-not-allowed' : 'hover:opacity-90'}`;
+
+      if (currentDiagnostics.length === 0) {
+        container.innerHTML = `
+          <div class="p-6 rounded-xl bg-[var(--card)] border border-[var(--border)] text-center space-y-2">
+            <div class="text-2xl">✅</div>
+            <h3 class="font-semibold text-sm text-[var(--foreground)]">¡Sin errores ni advertencias!</h3>
+            <p class="text-xs text-[var(--muted-foreground)]">Todas las entidades tienen clave primaria (@id), las relaciones tienen tipos compatibles y las reglas de integridad referencial son válidas en Prisma y SQL.</p>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = currentDiagnostics.map((d, idx) => {
+        let badgeClass = 'bg-blue-500/15 text-blue-400 border-blue-500/30';
+        let badgeLabel = 'INFO';
+        if (d.severity === 'error') {
+          badgeClass = 'bg-red-500/15 text-red-500 border-red-500/30';
+          badgeLabel = 'ERROR';
+        } else if (d.severity === 'warn') {
+          badgeClass = 'bg-amber-500/15 text-amber-500 border-amber-500/30';
+          badgeLabel = 'AVISO';
+        }
+
+        return `
+          <div class="p-3 rounded-xl bg-[var(--card)] border border-[var(--border)] space-y-2">
+            <div class="flex items-start justify-between gap-2">
+              <div class="flex items-center gap-2">
+                <span class="px-2 py-0.5 rounded border text-xs font-bold ${badgeClass}">${badgeLabel}</span>
+                <span class="font-semibold text-xs text-[var(--foreground)]">${escapeHtml(d.title)}</span>
+              </div>
+              ${d.entityId ? `<button onclick="focusEntityOnCanvas('${escapeAttr(d.entityId)}')" class="text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] shrink-0" title="Ver en lienzo">🎯 Ver</button>` : ''}
+            </div>
+            <p class="text-xs text-[var(--muted-foreground)] leading-relaxed">${escapeHtml(d.description)}</p>
+            ${d.fixFn ? `
+              <div class="pt-1 flex justify-end">
+                <button onclick="applySingleDiagnosticFix(${idx})" class="px-2.5 py-1 rounded-lg bg-[var(--secondary)] hover:bg-[var(--primary)] hover:text-[var(--primary-foreground)] text-xs font-medium transition">
+                  🪄 ${escapeHtml(d.fixLabel || 'Auto-Corregir')}
+                </button>
+              </div>
+            ` : ''}
+          </div>
+        `;
+      }).join('');
+    }
+
+    function applySingleDiagnosticFix(idx) {
+      const diag = currentDiagnostics[idx];
+      if (!diag || typeof diag.fixFn !== 'function') return;
+      diag.fixFn();
+      pushHistory();
+      syncAllViews(true);
+      showToast('Problema corregido automáticamente');
+    }
+
+    function autoFixAllDiagnostics() {
+      let fixed = 0;
+      currentDiagnostics.forEach(d => {
+        if (typeof d.fixFn === 'function') {
+          d.fixFn();
+          fixed++;
+        }
+      });
+      if (fixed > 0) {
+        pushHistory();
+        syncAllViews(true);
+        showToast(`${fixed} problema(s) corregido(s) automáticamente`);
+      }
+    }
+
+    // ============================================================================
+    // STRING HELPERS
+    // ============================================================================
+    function camelCase(str) {
+      if (!str) return 'item';
+      const cleaned = str.replace(/[^A-Za-z0-9_]/g, '');
+      if (!cleaned) return 'item';
+      return cleaned.charAt(0).toLowerCase() + cleaned.slice(1);
+    }
+
+    function pluralize(word) {
+      if (!word) return 'items';
+      if (word.endsWith('y') && !/[aeiou]y$/i.test(word)) {
+        return word.slice(0, -1) + 'ies';
+      }
+      if (word.endsWith('s') || word.endsWith('x') || word.endsWith('z')) {
+        return word + 'es';
+      }
+      return word + 's';
+    }
+
+    // ============================================================================
+    // CANVAS RENDERING (ENTITIES + SVG CROW'S FOOT RELATIONS)
+    // ============================================================================
+    function renderCanvas() {
+      const container = document.getElementById('entitiesContainer');
+      const svg = document.getElementById('relationsSvg');
+      const world = document.getElementById('canvasWorld');
+
+      world.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`;
+      document.getElementById('zoomPercentBtn').textContent = `${Math.round(viewport.zoom * 100)}%`;
+      document.getElementById('statsLabel').textContent =
+        `${state.entities.length} entidades · ${state.relations.length} relaciones`;
+
+      container.innerHTML = '';
+      const enumNames = new Set((state.enums || []).map(e => e.name));
+
+      // Check entities with validation errors to highlight badge on card
+      const entityErrors = new Set(
+        currentDiagnostics.filter(d => d.severity === 'error' && d.entityId).map(d => d.entityId)
+      );
+
+      state.entities.forEach(entity => {
+        const isSelected = selectedEntityId === entity.id;
+        const hasError = entityErrors.has(entity.id);
+        const card = document.createElement('div');
+        card.className = `entity-card pointer-events-auto absolute bg-[var(--card)] border rounded-xl overflow-hidden shadow-md ${
+          isSelected ? 'border-[var(--primary)] ring-2 ring-[var(--primary)]/30' : (hasError ? 'border-red-500/70' : 'border-[var(--border)]')
+        }`;
+        card.style.width = `${CARD_WIDTH}px`;
+        card.style.left = `${entity.x}px`;
+        card.style.top = `${entity.y}px`;
+
+        const header = document.createElement('div');
+        header.className = 'h-[40px] px-3 flex items-center justify-between cursor-move select-none border-b border-[var(--border)]';
+        header.style.borderTop = `4px solid ${entity.color || '#3b82f6'}`;
+        header.innerHTML = `
+          <div class="flex items-center gap-2 truncate">
+            <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${entity.color || '#3b82f6'}"></span>
+            <span class="font-bold text-xs text-[var(--foreground)] truncate">${escapeHtml(entity.name)}</span>
+            ${hasError ? `<span title="Esta entidad tiene errores de validación" class="text-xs text-red-500 font-bold">⚠</span>` : ''}
+          </div>
+          <div class="flex items-center gap-1 shrink-0">
+            <button onclick="event.stopPropagation(); quickAddField('${escapeAttr(entity.id)}')" title="Añadir campo" class="w-6 h-6 rounded hover:bg-[var(--secondary)] text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] flex items-center justify-center">+</button>
+            <button onclick="event.stopPropagation(); inspectEntity('${escapeAttr(entity.id)}')" title="Editar en Inspector" class="w-6 h-6 rounded hover:bg-[var(--secondary)] text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] flex items-center justify-center">✎</button>
+          </div>
+        `;
+
+        header.addEventListener('mousedown', (e) => startEntityDrag(e, entity));
+        card.addEventListener('click', (e) => {
+          e.stopPropagation();
+          selectedEntityId = entity.id;
+          selectedRelationId = null;
+          renderCanvas();
+        });
+
+        card.appendChild(header);
+
+        const fieldsBox = document.createElement('div');
+        fieldsBox.className = 'divide-y divide-[var(--border)]/50';
+
+        entity.fields.forEach(f => {
+          const isEnum = enumNames.has(f.type);
+          const row = document.createElement('div');
+          row.className = 'h-[30px] px-3 flex items-center justify-between gap-2 text-xs hover:bg-[var(--secondary)]/50 transition relative';
+
+          let badgeHtml = '';
+          if (f.isId) {
+            badgeHtml = `<span class="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-500 font-bold text-xs">PK</span>`;
+          } else if (f.isForeignKey) {
+            badgeHtml = `<span class="px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-400 font-bold text-xs">FK</span>`;
+          } else if (f.isUnique) {
+            badgeHtml = `<span class="px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-400 font-bold text-xs">UK</span>`;
+          } else if (isEnum) {
+            badgeHtml = `<span class="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-400 font-bold text-xs">EN</span>`;
+          } else {
+            badgeHtml = `<span class="w-6 inline-block text-center text-[var(--muted-foreground)]">·</span>`;
+          }
+
+          const typeLabel = `${f.type}${f.isArray ? '[]' : ''}${f.isNullable ? '?' : ''}`;
+          row.innerHTML = `
+            <div class="flex items-center gap-2 truncate">
+              ${badgeHtml}
+              <span class="truncate ${f.isId ? 'font-semibold text-[var(--foreground)]' : 'text-[var(--foreground)]'}">${escapeHtml(f.name)}</span>
+            </div>
+            <div class="flex items-center gap-1 shrink-0 font-mono text-xs text-[var(--muted-foreground)]">
+              <span>${escapeHtml(typeLabel)}</span>
+            </div>
+          `;
+          fieldsBox.appendChild(row);
+        });
+
+        card.appendChild(fieldsBox);
+        container.appendChild(card);
+      });
+
+      renderRelationsSvg(svg);
+    }
+
+    function getFieldAnchorPoint(entity, fieldName, side) {
+      const idx = Math.max(0, entity.fields.findIndex(f => f.name === fieldName));
+      const y = entity.y + CARD_HEADER_HEIGHT + idx * CARD_ROW_HEIGHT + CARD_ROW_HEIGHT / 2;
+      const x = side === 'right' ? entity.x + CARD_WIDTH : entity.x;
+      return { x, y };
+    }
+
+    function buildCrowsFootSymbolSvg(x, y, dir, cardinality, color) {
+      const parts = [];
+      const strokeW = 1.8;
+
+      if (cardinality === '||') {
+        const x1 = x + dir * 8;
+        const x2 = x + dir * 14;
+        parts.push(`<line x1="${x1}" y1="${y - 6}" x2="${x1}" y2="${y + 6}" stroke="${color}" stroke-width="${strokeW}" />`);
+        parts.push(`<line x1="${x2}" y1="${y - 6}" x2="${x2}" y2="${y + 6}" stroke="${color}" stroke-width="${strokeW}" />`);
+      } else if (cardinality === '|o') {
+        const x1 = x + dir * 8;
+        const cx = x + dir * 17;
+        parts.push(`<line x1="${x1}" y1="${y - 6}" x2="${x1}" y2="${y + 6}" stroke="${color}" stroke-width="${strokeW}" />`);
+        parts.push(`<circle cx="${cx}" cy="${y}" r="4.5" fill="var(--background)" stroke="${color}" stroke-width="${strokeW}" />`);
+      } else if (cardinality === '|{') {
+        const xBase = x + dir * 14;
+        const xTick = x + dir * 16;
+        parts.push(`<line x1="${xBase}" y1="${y}" x2="${x}" y2="${y - 7}" stroke="${color}" stroke-width="${strokeW}" />`);
+        parts.push(`<line x1="${xBase}" y1="${y}" x2="${x}" y2="${y}" stroke="${color}" stroke-width="${strokeW}" />`);
+        parts.push(`<line x1="${xBase}" y1="${y}" x2="${x}" y2="${y + 7}" stroke="${color}" stroke-width="${strokeW}" />`);
+        parts.push(`<line x1="${xTick}" y1="${y - 6}" x2="${xTick}" y2="${y + 6}" stroke="${color}" stroke-width="${strokeW}" />`);
+      } else {
+        const xBase = x + dir * 13;
+        const cx = x + dir * 19;
+        parts.push(`<line x1="${xBase}" y1="${y}" x2="${x}" y2="${y - 7}" stroke="${color}" stroke-width="${strokeW}" />`);
+        parts.push(`<line x1="${xBase}" y1="${y}" x2="${x}" y2="${y}" stroke="${color}" stroke-width="${strokeW}" />`);
+        parts.push(`<line x1="${xBase}" y1="${y}" x2="${x}" y2="${y + 7}" stroke="${color}" stroke-width="${strokeW}" />`);
+        parts.push(`<circle cx="${cx}" cy="${y}" r="4.5" fill="var(--background)" stroke="${color}" stroke-width="${strokeW}" />`);
+      }
+
+      return parts.join('');
+    }
+
+    function renderRelationsSvg(svg) {
+      const entityMap = Object.fromEntries(state.entities.map(e => [e.name, e]));
+      let svgHtml = '';
+
+      state.relations.forEach(rel => {
+        const srcEnt = entityMap[rel.sourceEntity];
+        const tgtEnt = entityMap[rel.targetEntity];
+        if (!srcEnt || !tgtEnt) return;
+
+        const isSelected = selectedRelationId === rel.id || hoveredRelationId === rel.id;
+        const strokeColor = isSelected ? 'var(--primary)' : 'var(--muted-foreground)';
+        const dashArray = rel.identifying === false ? 'stroke-dasharray="6,5"' : '';
+
+        let srcSide = 'right';
+        let tgtSide = 'left';
+
+        if (srcEnt.name === tgtEnt.name) {
+          srcSide = 'right';
+          tgtSide = 'right';
+        } else {
+          const srcCenter = srcEnt.x + CARD_WIDTH / 2;
+          const tgtCenter = tgtEnt.x + CARD_WIDTH / 2;
+          if (Math.abs(srcCenter - tgtCenter) < CARD_WIDTH * 0.75) {
+            srcSide = 'right';
+            tgtSide = 'right';
+          } else if (srcCenter <= tgtCenter) {
+            srcSide = 'right';
+            tgtSide = 'left';
+          } else {
+            srcSide = 'left';
+            tgtSide = 'right';
+          }
+        }
+
+        const p1 = getFieldAnchorPoint(srcEnt, rel.sourceField, srcSide);
+        const p2 = getFieldAnchorPoint(tgtEnt, rel.targetField, tgtSide);
+
+        const dir1 = srcSide === 'right' ? 1 : -1;
+        const dir2 = tgtSide === 'right' ? 1 : -1;
+
+        const dist = Math.max(70, Math.abs(p2.x - p1.x) * 0.48);
+        const c1x = p1.x + dir1 * dist;
+        const c2x = p2.x + dir2 * dist;
+
+        const pathData = `M ${p1.x} ${p1.y} C ${c1x} ${p1.y}, ${c2x} ${p2.y}, ${p2.x} ${p2.y}`;
+
+        const midX = 0.125 * p1.x + 0.375 * c1x + 0.375 * c2x + 0.125 * p2.x;
+        const midY = 0.125 * p1.y + 0.375 * p1.y + 0.375 * p2.y + 0.125 * p2.y;
+
+        const srcMarker = buildCrowsFootSymbolSvg(p1.x, p1.y, dir1, rel.sourceCardinality, strokeColor);
+        const tgtMarker = buildCrowsFootSymbolSvg(p2.x, p2.y, dir2, rel.targetCardinality, strokeColor);
+
+        const labelText = rel.name || '';
+        const labelWidth = Math.max(48, labelText.length * 7 + 18);
+
+        svgHtml += `
+          <g class="pointer-events-auto cursor-pointer"
+             onmouseenter="setHoveredRelation('${escapeAttr(rel.id)}')"
+             onmouseleave="setHoveredRelation(null)"
+             onclick="event.stopPropagation(); openRelationModal('${escapeAttr(rel.id)}')">
+            <path d="${pathData}" fill="none" stroke="transparent" stroke-width="14" />
+            <path class="rel-path" d="${pathData}" fill="none" stroke="${strokeColor}" stroke-width="${isSelected ? 2.6 : 1.8}" ${dashArray} />
+            ${srcMarker}
+            ${tgtMarker}
+            ${labelText ? `
+              <g transform="translate(${midX}, ${midY})">
+                <rect x="${-labelWidth / 2}" y="-11" width="${labelWidth}" height="22" rx="6"
+                      fill="var(--card)" stroke="${isSelected ? 'var(--primary)' : 'var(--border)'}" stroke-width="1.2" />
+                <text x="0" y="4" text-anchor="middle" fill="var(--foreground)" font-size="12" font-family="sans-serif">
+                  ${escapeHtml(labelText)}
+                </text>
+              </g>
+            ` : ''}
+          </g>
+        `;
+      });
+
+      svg.innerHTML = svgHtml;
+    }
+
+    function setHoveredRelation(relId) {
+      hoveredRelationId = relId;
+      renderRelationsSvg(document.getElementById('relationsSvg'));
+    }
+
+    // ============================================================================
+    // DRAGGING ENTITIES & PAN/ZOOM VIEWPORT
+    // ============================================================================
+    let dragState = null;
+
+    function startEntityDrag(e, entity) {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      selectedEntityId = entity.id;
+      dragState = {
+        type: 'entity',
+        entity,
+        startX: e.clientX,
+        startY: e.clientY,
+        origX: entity.x,
+        origY: entity.y,
+        moved: false
+      };
+    }
+
+    const canvasViewport = document.getElementById('canvasViewport');
+
+    canvasViewport.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      selectedEntityId = null;
+      selectedRelationId = null;
+      dragState = {
+        type: 'pan',
+        startX: e.clientX,
+        startY: e.clientY,
+        origX: viewport.x,
+        origY: viewport.y
+      };
+      renderCanvas();
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!dragState) return;
+      if (dragState.type === 'entity') {
+        const dx = (e.clientX - dragState.startX) / viewport.zoom;
+        const dy = (e.clientY - dragState.startY) / viewport.zoom;
+        if (Math.abs(dx) > 2 || Math.abs(dy) > 2) dragState.moved = true;
+        dragState.entity.x = Math.round((dragState.origX + dx) / 12) * 12;
+        dragState.entity.y = Math.round((dragState.origY + dy) / 12) * 12;
+        renderCanvas();
+      } else if (dragState.type === 'pan') {
+        viewport.x = dragState.origX + (e.clientX - dragState.startX);
+        viewport.y = dragState.origY + (e.clientY - dragState.startY);
+        const world = document.getElementById('canvasWorld');
+        world.style.transform = `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`;
+      }
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (dragState && dragState.type === 'entity' && dragState.moved) {
+        pushHistory();
+      }
+      dragState = null;
+    });
+
+    canvasViewport.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const rect = canvasViewport.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      const worldX = (mouseX - viewport.x) / viewport.zoom;
+      const worldY = (mouseY - viewport.y) / viewport.zoom;
+
+      const factor = e.deltaY < 0 ? 1.1 : 0.9;
+      const newZoom = Math.min(2.2, Math.max(0.3, viewport.zoom * factor));
+
+      viewport.x = mouseX - worldX * newZoom;
+      viewport.y = mouseY - worldY * newZoom;
+      viewport.zoom = newZoom;
+
+      renderCanvas();
+    }, { passive: false });
+
+    function zoomBy(delta) {
+      const rect = canvasViewport.getBoundingClientRect();
+      const centerX = rect.width / 2;
+      const centerY = rect.height / 2;
+      const worldX = (centerX - viewport.x) / viewport.zoom;
+      const worldY = (centerY - viewport.y) / viewport.zoom;
+
+      const newZoom = Math.min(2.2, Math.max(0.3, viewport.zoom + delta));
+      viewport.x = centerX - worldX * newZoom;
+      viewport.y = centerY - worldY * newZoom;
+      viewport.zoom = newZoom;
+      renderCanvas();
+    }
+
+    function resetZoom() {
+      viewport.zoom = 1;
+      viewport.x = 40;
+      viewport.y = 60;
+      renderCanvas();
+    }
+
+    function fitToScreen() {
+      if (state.entities.length === 0) return resetZoom();
+      const rect = canvasViewport.getBoundingClientRect();
+
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      state.entities.forEach(e => {
+        const h = CARD_HEADER_HEIGHT + e.fields.length * CARD_ROW_HEIGHT + 16;
+        minX = Math.min(minX, e.x);
+        minY = Math.min(minY, e.y);
+        maxX = Math.max(maxX, e.x + CARD_WIDTH);
+        maxY = Math.max(maxY, e.y + h);
+      });
+
+      const contentW = Math.max(300, maxX - minX + 120);
+      const contentH = Math.max(300, maxY - minY + 140);
+
+      const scaleX = rect.width / contentW;
+      const scaleY = rect.height / contentH;
+      viewport.zoom = Math.min(1.25, Math.max(0.35, Math.min(scaleX, scaleY)));
+
+      viewport.x = (rect.width - (maxX - minX) * viewport.zoom) / 2 - minX * viewport.zoom;
+      viewport.y = (rect.height - (maxY - minY) * viewport.zoom) / 2 - minY * viewport.zoom + 16;
+      renderCanvas();
+    }
+
+    // ============================================================================
+    // AUTO-LAYOUT ALGORITHMS
+    // ============================================================================
+    function autoLayout(mode = 'layered') {
+      if (state.entities.length === 0) return;
+
+      if (mode === 'grid') {
+        const cols = Math.max(2, Math.ceil(Math.sqrt(state.entities.length)));
+        state.entities.forEach((ent, idx) => {
+          const c = idx % cols;
+          const r = Math.floor(idx / cols);
+          ent.x = 60 + c * 350;
+          ent.y = 70 + r * 300;
+        });
+      } else {
+        const inDegree = {};
+        const adj = {};
+        state.entities.forEach(e => {
+          inDegree[e.name] = 0;
+          adj[e.name] = [];
+        });
+        state.relations.forEach(r => {
+          if (r.sourceEntity !== r.targetEntity && adj[r.sourceEntity] && inDegree[r.targetEntity] !== undefined) {
+            adj[r.sourceEntity].push(r.targetEntity);
+            inDegree[r.targetEntity]++;
+          }
+        });
+
+        const layerOf = {};
+        const queue = [];
+        state.entities.forEach(e => {
+          if (inDegree[e.name] === 0) {
+            layerOf[e.name] = 0;
+            queue.push(e.name);
+          }
+        });
+
+        while (queue.length > 0) {
+          const curr = queue.shift();
+          (adj[curr] || []).forEach(next => {
+            layerOf[next] = Math.max(layerOf[next] || 0, (layerOf[curr] || 0) + 1);
+            inDegree[next]--;
+            if (inDegree[next] === 0) queue.push(next);
+          });
+        }
+
+        const layers = {};
+        state.entities.forEach(e => {
+          const l = Math.min(4, layerOf[e.name] !== undefined ? layerOf[e.name] : 1);
+          if (!layers[l]) layers[l] = [];
+          layers[l].push(e);
+        });
+
+        Object.keys(layers).sort((a, b) => Number(a) - Number(b)).forEach((layerIdx, colIdx) => {
+          let currentY = 70;
+          layers[layerIdx].forEach(ent => {
+            ent.x = 60 + colIdx * 370;
+            ent.y = currentY;
+            const cardH = CARD_HEADER_HEIGHT + ent.fields.length * CARD_ROW_HEIGHT + 48;
+            currentY += cardH;
+          });
+        });
+      }
+
+      pushHistory();
+      fitToScreen();
+      showToast('Diagrama ordenado automáticamente');
+    }
+
+    // ============================================================================
+    // LEFT PANEL TABS & CODE SYNCHRONIZATION
+    // ============================================================================
+    function switchLeftTab(tab) {
+      activeLeftTab = tab;
+
+      const tabs = {
+        prisma: document.getElementById('tabBtnPrisma'),
+        mermaid: document.getElementById('tabBtnMermaid'),
+        sql: document.getElementById('tabBtnSql'),
+        inspector: document.getElementById('tabBtnInspector'),
+        validator: document.getElementById('tabBtnValidator')
+      };
+
+      Object.entries(tabs).forEach(([key, btn]) => {
+        const extra = key === 'validator' ? ' flex items-center justify-center gap-1' : '';
+        if (key === tab) {
+          btn.className = `py-1.5 px-1.5 rounded-md text-xs font-semibold bg-[var(--primary)] text-[var(--primary-foreground)] shadow-xs transition truncate${extra}`;
+        } else {
+          btn.className = `py-1.5 px-1.5 rounded-md text-xs font-medium text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition truncate${extra}`;
+        }
+      });
+
+      const codePanel = document.getElementById('codePanel');
+      const inspectorPanel = document.getElementById('inspectorPanel');
+      const validatorPanel = document.getElementById('validatorPanel');
+      const sqlDialectSelect = document.getElementById('sqlDialectSelect');
+
+      codePanel.classList.add('hidden');
+      inspectorPanel.classList.add('hidden');
+      validatorPanel.classList.add('hidden');
+      sqlDialectSelect.classList.add('hidden');
+
+      if (tab === 'inspector') {
+        inspectorPanel.classList.remove('hidden');
+        renderInspector();
+      } else if (tab === 'validator') {
+        validatorPanel.classList.remove('hidden');
+        renderValidatorPanel();
+      } else {
+        codePanel.classList.remove('hidden');
+        if (tab === 'prisma') {
+          document.getElementById('codeFormatBadge').textContent = 'schema.prisma';
+        } else if (tab === 'mermaid') {
+          document.getElementById('codeFormatBadge').textContent = 'diagram.mmd';
+        } else if (tab === 'sql') {
+          document.getElementById('codeFormatBadge').textContent = 'DDL SQL';
+          sqlDialectSelect.classList.remove('hidden');
+        }
+        updateCodeEditorFromState();
+      }
+    }
+
+    function changeSqlDialect(dialect) {
+      activeSqlDialect = dialect;
+      updateCodeEditorFromState();
+    }
+
+    function updateCodeEditorFromState() {
+      const textarea = document.getElementById('codeTextarea');
+      if (activeLeftTab === 'prisma') {
+        textarea.value = generatePrismaSchema(state);
+      } else if (activeLeftTab === 'mermaid') {
+        textarea.value = generateMermaidER(state);
+      } else if (activeLeftTab === 'sql') {
+        textarea.value = generateSqlDDL(state, activeSqlDialect);
+      }
+      setParseStatus('ok', 'Sincronizado con el modelo visual');
+    }
+
+    function handleCodeInput() {
+      setParseStatus('pending', 'Editando...');
+      clearTimeout(codeDebounceTimer);
+      codeDebounceTimer = setTimeout(() => {
+        applyCodeChanges(false);
+      }, 450);
+    }
+
+    function applyCodeChanges(showFeedback = false) {
+      const code = document.getElementById('codeTextarea').value;
+      if (!code.trim()) return;
+
+      const existingPos = {};
+      state.entities.forEach(e => {
+        existingPos[e.name] = { x: e.x, y: e.y, color: e.color };
+      });
+
+      try {
+        let parsed;
+        if (/CREATE\s+TABLE/i.test(code) || activeLeftTab === 'sql') {
+          parsed = parseSqlDDL(code, existingPos);
+        } else if (/^\s*erDiagram\b/m.test(code) || (activeLeftTab === 'mermaid' && !/\bmodel\s+\w+\s*\{/.test(code))) {
+          parsed = parseMermaidER(code, existingPos);
+        } else {
+          parsed = parsePrismaSchema(code, existingPos);
+        }
+
+        if (parsed.entities.length === 0) {
+          setParseStatus('warn', 'No se detectaron entidades o tablas válidas todavía');
+          return;
+        }
+
+        state = parsed;
+        pushHistory();
+        runSchemaValidation();
+        renderCanvas();
+        setParseStatus('ok', `Sincronizado (${state.entities.length} entidades, ${state.relations.length} relaciones)`);
+        if (showFeedback) showToast('Código aplicado al diagrama');
+      } catch (err) {
+        setParseStatus('error', `Error de sintaxis: ${err.message}`);
+      }
+    }
+
+    function setParseStatus(level, message) {
+      const badge = document.getElementById('parseStatusBadge');
+      const msgText = document.getElementById('parseMessageText');
+      msgText.textContent = message;
+
+      if (level === 'ok') {
+        badge.textContent = 'Sincronizado';
+        badge.className = 'text-xs px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-500 font-medium';
+      } else if (level === 'pending') {
+        badge.textContent = 'Editando...';
+        badge.className = 'text-xs px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-500 font-medium';
+      } else if (level === 'warn') {
+        badge.textContent = 'Aviso';
+        badge.className = 'text-xs px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-500 font-medium';
+      } else {
+        badge.textContent = 'Error';
+        badge.className = 'text-xs px-2 py-0.5 rounded-full bg-red-500/15 text-red-500 font-medium';
+      }
+    }
+
+    function syncAllViews(updateCode = true) {
+      runSchemaValidation();
+      renderCanvas();
+      if (activeLeftTab === 'inspector') {
+        renderInspector();
+      } else if (activeLeftTab === 'validator') {
+        renderValidatorPanel();
+      } else if (updateCode) {
+        updateCodeEditorFromState();
+      }
+    }
+
+    // ============================================================================
+    // VISUAL INSPECTOR (CRUD FOR ENTITIES, FIELDS, ENUMS & RELATIONS)
+    // ============================================================================
+    function inspectEntity(entityId) {
+      selectedEntityId = entityId;
+      switchLeftTab('inspector');
+      setTimeout(() => {
+        const el = document.getElementById(`inspector-entity-${entityId}`);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 50);
+    }
+
+    function renderInspector() {
+      const container = document.getElementById('inspectorContent');
+      const query = (document.getElementById('inspectorSearch')?.value || '').toLowerCase().trim();
+
+      const allTypes = [
+        ...PRISMA_SCALAR_TYPES,
+        ...(state.enums || []).map(e => e.name)
+      ];
+
+      let html = '';
+
+      state.entities.forEach(ent => {
+        const matchesEntity = !query ||
+          ent.name.toLowerCase().includes(query) ||
+          ent.fields.some(f => f.name.toLowerCase().includes(query) || f.type.toLowerCase().includes(query));
+
+        if (!matchesEntity) return;
+
+        const isExpanded = selectedEntityId === ent.id || query.length > 0;
+
+        html += `
+          <div id="inspector-entity-${escapeAttr(ent.id)}" class="bg-[var(--card)] border ${selectedEntityId === ent.id ? 'border-[var(--primary)]' : 'border-[var(--border)]'} rounded-xl overflow-hidden">
+            <div class="p-2.5 flex items-center justify-between gap-2 bg-[var(--background)]/50 border-b border-[var(--border)]">
+              <div class="flex items-center gap-2 flex-1">
+                <input type="color" value="${ent.color || '#3b82f6'}"
+                       onchange="updateEntityColor('${escapeAttr(ent.id)}', this.value)"
+                       class="w-5 h-5 rounded cursor-pointer border-0 bg-transparent" title="Color de entidad" />
+                <input type="text" value="${escapeAttr(ent.name)}"
+                       onchange="renameEntity('${escapeAttr(ent.id)}', this.value)"
+                       class="bg-transparent font-bold text-xs text-[var(--foreground)] border-b border-transparent focus:border-[var(--primary)] outline-none px-1 py-0.5 w-full" />
+              </div>
+              <div class="flex items-center gap-1">
+                <button onclick="focusEntityOnCanvas('${escapeAttr(ent.id)}')" title="Centrar en lienzo" class="px-2 py-1 rounded hover:bg-[var(--secondary)] text-xs text-[var(--muted-foreground)]">🎯</button>
+                <button onclick="quickAddField('${escapeAttr(ent.id)}')" title="Añadir campo" class="px-2 py-1 rounded bg-[var(--secondary)] text-xs font-medium">+ Campo</button>
+                <button onclick="deleteEntity('${escapeAttr(ent.id)}')" title="Eliminar entidad" class="px-2 py-1 rounded hover:bg-red-500/15 text-red-500 text-xs">🗑️</button>
+              </div>
+            </div>
+
+            <div class="p-2 space-y-1.5 ${isExpanded ? '' : 'hidden'}">
+              ${ent.fields.map((f, fIdx) => `
+                <div class="p-2 rounded-lg bg-[var(--background)] border border-[var(--border)] space-y-1.5">
+                  <div class="flex items-center gap-1.5">
+                    <input type="text" value="${escapeAttr(f.name)}"
+                           onchange="updateFieldProp('${escapeAttr(ent.id)}', ${fIdx}, 'name', this.value)"
+                           placeholder="nombre_campo"
+                           class="flex-1 bg-[var(--card)] border border-[var(--border)] rounded px-2 py-1 text-xs text-[var(--foreground)] outline-none" />
+                    <select onchange="updateFieldProp('${escapeAttr(ent.id)}', ${fIdx}, 'type', this.value)"
+                            class="bg-[var(--card)] border border-[var(--border)] rounded px-2 py-1 text-xs text-[var(--foreground)] outline-none">
+                      ${allTypes.map(t => `<option value="${escapeAttr(t)}" ${f.type === t ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('')}
+                    </select>
+                    <button onclick="deleteField('${escapeAttr(ent.id)}', ${fIdx})" title="Eliminar campo" class="px-1.5 py-1 rounded hover:bg-red-500/15 text-red-500 text-xs">✕</button>
+                  </div>
+                  <div class="flex items-center justify-between gap-2 flex-wrap text-xs">
+                    <div class="flex items-center gap-2">
+                      <label class="flex items-center gap-1 cursor-pointer">
+                        <input type="checkbox" ${f.isId ? 'checked' : ''} onchange="updateFieldProp('${escapeAttr(ent.id)}', ${fIdx}, 'isId', this.checked)" />
+                        <span class="text-amber-500 font-semibold">PK</span>
+                      </label>
+                      <label class="flex items-center gap-1 cursor-pointer">
+                        <input type="checkbox" ${f.isForeignKey ? 'checked' : ''} onchange="updateFieldProp('${escapeAttr(ent.id)}', ${fIdx}, 'isForeignKey', this.checked)" />
+                        <span class="text-blue-400 font-semibold">FK</span>
+                      </label>
+                      <label class="flex items-center gap-1 cursor-pointer">
+                        <input type="checkbox" ${f.isUnique ? 'checked' : ''} onchange="updateFieldProp('${escapeAttr(ent.id)}', ${fIdx}, 'isUnique', this.checked)" />
+                        <span class="text-purple-400 font-semibold">UK</span>
+                      </label>
+                      <label class="flex items-center gap-1 cursor-pointer">
+                        <input type="checkbox" ${f.isNullable ? 'checked' : ''} onchange="updateFieldProp('${escapeAttr(ent.id)}', ${fIdx}, 'isNullable', this.checked)" />
+                        <span class="text-[var(--muted-foreground)]">Null (?)</span>
+                      </label>
+                    </div>
+                    <input type="text" value="${escapeAttr(f.defaultValue || '')}"
+                           onchange="updateFieldProp('${escapeAttr(ent.id)}', ${fIdx}, 'defaultValue', this.value)"
+                           placeholder="@default(...)"
+                           class="w-28 bg-[var(--card)] border border-[var(--border)] rounded px-2 py-0.5 text-xs font-mono text-[var(--muted-foreground)] outline-none" />
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      });
+
+      html += `
+        <div class="bg-[var(--card)] border border-[var(--border)] rounded-xl overflow-hidden">
+          <div class="p-2.5 bg-[var(--background)]/50 border-b border-[var(--border)] flex items-center justify-between">
+            <span class="font-bold text-xs text-[var(--foreground)]">🔗 Relaciones (${state.relations.length})</span>
+            <button onclick="openRelationModal()" class="text-xs text-[var(--primary)] font-medium hover:underline">+ Añadir</button>
+          </div>
+          <div class="p-2 space-y-1.5">
+            ${state.relations.length === 0 ? `<p class="text-xs text-[var(--muted-foreground)] p-2">No hay relaciones definidas.</p>` : ''}
+            ${state.relations.map(r => `
+              <div onclick="openRelationModal('${escapeAttr(r.id)}')"
+                   class="p-2 rounded-lg bg-[var(--background)] hover:bg-[var(--secondary)]/60 border border-[var(--border)] cursor-pointer flex items-center justify-between gap-2 transition">
+                <div class="text-xs truncate">
+                  <span class="font-semibold text-[var(--foreground)]">${escapeHtml(r.sourceEntity)}.${escapeHtml(r.sourceField)}</span>
+                  <span class="font-mono text-[var(--primary)] mx-1">${escapeHtml(r.sourceCardinality)}${r.identifying === false ? '..' : '--'}${escapeHtml(r.targetCardinality)}</span>
+                  <span class="font-semibold text-[var(--foreground)]">${escapeHtml(r.targetEntity)}.${escapeHtml(r.targetField)}</span>
+                </div>
+                <span class="text-xs px-2 py-0.5 rounded bg-[var(--card)] border border-[var(--border)] text-[var(--muted-foreground)] shrink-0">${escapeHtml(r.name || 'editar')}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+
+      if (state.enums && state.enums.length > 0) {
+        html += `
+          <div class="bg-[var(--card)] border border-[var(--border)] rounded-xl overflow-hidden">
+            <div class="p-2.5 bg-[var(--background)]/50 border-b border-[var(--border)] flex items-center justify-between">
+              <span class="font-bold text-xs text-[var(--foreground)]">🏷️ Enums Prisma (${state.enums.length})</span>
+            </div>
+            <div class="p-2 space-y-2">
+              ${state.enums.map((en, enIdx) => `
+                <div class="p-2 rounded-lg bg-[var(--background)] border border-[var(--border)] space-y-1.5">
+                  <div class="flex items-center justify-between">
+                    <input type="text" value="${escapeAttr(en.name)}"
+                           onchange="renameEnum(${enIdx}, this.value)"
+                           class="font-bold text-xs bg-transparent text-emerald-400 outline-none" />
+                    <button onclick="deleteEnum(${enIdx})" class="text-xs text-red-500 px-1.5">✕</button>
+                  </div>
+                  <input type="text" value="${escapeAttr(en.values.join(', '))}"
+                         onchange="updateEnumValues(${enIdx}, this.value)"
+                         placeholder="VAL1, VAL2, VAL3"
+                         class="w-full bg-[var(--card)] border border-[var(--border)] rounded px-2 py-1 text-xs font-mono text-[var(--foreground)]" />
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `;
+      }
+
+      container.innerHTML = html;
+    }
+
+    // ============================================================================
+    // ENTITY / FIELD / ENUM MUTATIONS
+    // ============================================================================
+    function addNewEntity() {
+      let baseName = 'NuevaEntidad';
+      let count = 1;
+      while (state.entities.some(e => e.name === `${baseName}${count}`)) count++;
+      const name = `${baseName}${count}`;
+
+      const newEnt = {
+        id: name,
+        name,
+        tableName: '',
+        x: Math.round(((-viewport.x + 220) / viewport.zoom) / 12) * 12,
+        y: Math.round(((-viewport.y + 140) / viewport.zoom) / 12) * 12,
+        color: ENTITY_COLORS[state.entities.length % ENTITY_COLORS.length],
+        fields: [
+          {
+            id: `${name}_id`,
+            name: 'id',
+            type: 'Int',
+            isId: true,
+            isUnique: false,
+            isNullable: false,
+            isArray: false,
+            isForeignKey: false,
+            defaultValue: 'autoincrement()',
+            comment: ''
+          },
+          {
+            id: `${name}_nombre`,
+            name: 'nombre',
+            type: 'String',
+            isId: false,
+            isUnique: false,
+            isNullable: false,
+            isArray: false,
+            isForeignKey: false,
+            defaultValue: '',
+            comment: ''
+          }
+        ]
+      };
+
+      state.entities.push(newEnt);
+      selectedEntityId = newEnt.id;
+      pushHistory();
+      syncAllViews(true);
+      showToast(`Entidad "${name}" creada`);
+    }
+
+    function quickAddField(entityId) {
+      const ent = state.entities.find(e => e.id === entityId);
+      if (!ent) return;
+      let idx = ent.fields.length + 1;
+      let fieldName = `campo${idx}`;
+      while (ent.fields.some(f => f.name === fieldName)) {
+        idx++;
+        fieldName = `campo${idx}`;
+      }
+      ent.fields.push({
+        id: `${ent.name}_${fieldName}`,
+        name: fieldName,
+        type: 'String',
+        isId: false,
+        isUnique: false,
+        isNullable: false,
+        isArray: false,
+        isForeignKey: false,
+        defaultValue: '',
+        comment: ''
+      });
+      selectedEntityId = ent.id;
+      pushHistory();
+      syncAllViews(true);
+    }
+
+    function updateEntityColor(entityId, color) {
+      const ent = state.entities.find(e => e.id === entityId);
+      if (!ent) return;
+      ent.color = color;
+      pushHistory();
+      renderCanvas();
+    }
+
+    function renameEntity(entityId, newNameRaw) {
+      const newName = newNameRaw.replace(/[^A-Za-z0-9_]/g, '').trim();
+      if (!newName) return renderInspector();
+      const ent = state.entities.find(e => e.id === entityId);
+      if (!ent || ent.name === newName) return;
+      if (state.entities.some(e => e.name === newName)) {
+        showToast('Ya existe una entidad con ese nombre');
+        return renderInspector();
+      }
+
+      const oldName = ent.name;
+      ent.name = newName;
+      ent.id = newName;
+      if (selectedEntityId === oldName) selectedEntityId = newName;
+
+      state.relations.forEach(r => {
+        if (r.sourceEntity === oldName) r.sourceEntity = newName;
+        if (r.targetEntity === oldName) r.targetEntity = newName;
+      });
+
+      pushHistory();
+      syncAllViews(true);
+    }
+
+    function deleteEntity(entityId) {
+      state.entities = state.entities.filter(e => e.id !== entityId);
+      state.relations = state.relations.filter(r => r.sourceEntity !== entityId && r.targetEntity !== entityId);
+      if (selectedEntityId === entityId) selectedEntityId = null;
+      pushHistory();
+      syncAllViews(true);
+      showToast(`Entidad "${entityId}" eliminada`);
+    }
+
+    function updateFieldProp(entityId, fieldIdx, prop, value) {
+      const ent = state.entities.find(e => e.id === entityId);
+      if (!ent || !ent.fields[fieldIdx]) return;
+      const field = ent.fields[fieldIdx];
+      const oldName = field.name;
+
+      if (prop === 'name') {
+        const clean = value.replace(/[^A-Za-z0-9_]/g, '').trim();
+        if (!clean) return renderInspector();
+        field.name = clean;
+        state.relations.forEach(r => {
+          if (r.sourceEntity === ent.name && r.sourceField === oldName) r.sourceField = clean;
+          if (r.targetEntity === ent.name && r.targetField === oldName) r.targetField = clean;
+        });
+      } else {
+        field[prop] = value;
+      }
+
+      pushHistory();
+      syncAllViews(true);
+    }
+
+    function deleteField(entityId, fieldIdx) {
+      const ent = state.entities.find(e => e.id === entityId);
+      if (!ent || ent.fields.length <= 1) {
+        showToast('Cada entidad debe tener al menos un campo');
+        return;
+      }
+      const removed = ent.fields.splice(fieldIdx, 1)[0];
+      state.relations = state.relations.filter(r =>
+        !(r.sourceEntity === ent.name && r.sourceField === removed.name) &&
+        !(r.targetEntity === ent.name && r.targetField === removed.name)
+      );
+      pushHistory();
+      syncAllViews(true);
+    }
+
+    function addNewEnum() {
+      const name = `EstadoEnum${state.enums.length + 1}`;
+      state.enums.push({
+        name,
+        values: ['ACTIVO', 'PENDIENTE', 'INACTIVO']
+      });
+      pushHistory();
+      syncAllViews(true);
+      showToast(`Enum "${name}" añadido`);
+    }
+
+    function renameEnum(idx, newNameRaw) {
+      const clean = newNameRaw.replace(/[^A-Za-z0-9_]/g, '').trim();
+      if (!clean || !state.enums[idx]) return;
+      const oldName = state.enums[idx].name;
+      state.enums[idx].name = clean;
+      state.entities.forEach(e => {
+        e.fields.forEach(f => {
+          if (f.type === oldName) f.type = clean;
+        });
+      });
+      pushHistory();
+      syncAllViews(true);
+    }
+
+    function updateEnumValues(idx, rawCsv) {
+      if (!state.enums[idx]) return;
+      const vals = rawCsv.split(',').map(s => s.replace(/[^A-Za-z0-9_]/g, '').trim()).filter(Boolean);
+      if (vals.length > 0) {
+        state.enums[idx].values = vals;
+        pushHistory();
+        syncAllViews(true);
+      }
+    }
+
+    function deleteEnum(idx) {
+      state.enums.splice(idx, 1);
+      pushHistory();
+      syncAllViews(true);
+    }
+
+    function focusEntityOnCanvas(entityId) {
+      const ent = state.entities.find(e => e.id === entityId);
+      if (!ent) return;
+      const rect = canvasViewport.getBoundingClientRect();
+      viewport.x = rect.width / 2 - (ent.x + CARD_WIDTH / 2) * viewport.zoom;
+      viewport.y = rect.height / 2 - (ent.y + 100) * viewport.zoom;
+      selectedEntityId = ent.id;
+      renderCanvas();
+    }
+
+    // ============================================================================
+    // RELATIONSHIP MODAL
+    // ============================================================================
+    function openRelationModal(relId = null) {
+      if (state.entities.length === 0) {
+        showToast('Primero crea al menos una entidad');
+        return;
+      }
+
+      const modal = document.getElementById('relationModal');
+      const srcSelect = document.getElementById('relSourceEntity');
+      const tgtSelect = document.getElementById('relTargetEntity');
+      const deleteBtn = document.getElementById('btnDeleteRelationModal');
+
+      const entityOptions = state.entities
+        .map(e => `<option value="${escapeAttr(e.name)}">${escapeHtml(e.name)}</option>`)
+        .join('');
+      srcSelect.innerHTML = entityOptions;
+      tgtSelect.innerHTML = entityOptions;
+
+      const existing = relId ? state.relations.find(r => r.id === relId) : null;
+      document.getElementById('relEditId').value = existing ? existing.id : '';
+
+      if (existing) {
+        document.getElementById('relationModalTitle').textContent = '🔗 Editar Relación';
+        srcSelect.value = existing.sourceEntity;
+        tgtSelect.value = existing.targetEntity;
+        populateRelationFieldSelects('source', existing.sourceField);
+        populateRelationFieldSelects('target', existing.targetField);
+        document.getElementById('relSourceCard').value = existing.sourceCardinality || '||';
+        document.getElementById('relTargetCard').value = existing.targetCardinality || 'o{';
+        document.getElementById('relLabelInput').value = existing.name || '';
+        document.getElementById('relIdentifying').value = existing.identifying === false ? 'false' : 'true';
+        document.getElementById('relOnDelete').value = existing.onDelete || '';
+        deleteBtn.classList.remove('hidden');
+      } else {
+        document.getElementById('relationModalTitle').textContent = '🔗 Nueva Relación';
+        srcSelect.value = state.entities[0].name;
+        tgtSelect.value = state.entities[Math.min(1, state.entities.length - 1)].name;
+        populateRelationFieldSelects('source');
+        populateRelationFieldSelects('target');
+        document.getElementById('relSourceCard').value = '||';
+        document.getElementById('relTargetCard').value = 'o{';
+        document.getElementById('relLabelInput').value = 'tiene';
+        document.getElementById('relIdentifying').value = 'true';
+        document.getElementById('relOnDelete').value = 'Cascade';
+        deleteBtn.classList.add('hidden');
+      }
+
+      modal.classList.remove('hidden');
+    }
+
+    function populateRelationFieldSelects(which, preferredField = null) {
+      const entityName = document.getElementById(which === 'source' ? 'relSourceEntity' : 'relTargetEntity').value;
+      const fieldSelect = document.getElementById(which === 'source' ? 'relSourceField' : 'relTargetField');
+      const ent = state.entities.find(e => e.name === entityName);
+      if (!ent) return;
+
+      let html = ent.fields
+        .map(f => `<option value="${escapeAttr(f.name)}">${escapeHtml(f.name)} (${escapeHtml(f.type)})</option>`)
+        .join('');
+
+      if (which === 'target') {
+        const srcName = document.getElementById('relSourceEntity').value || 'parent';
+        const autoFk = `${camelCase(srcName)}Id`;
+        if (!ent.fields.some(f => f.name === autoFk)) {
+          html += `<option value="__AUTO_FK__">+ Crear clave foránea automática (${escapeHtml(autoFk)})</option>`;
+        }
+      }
+
+      fieldSelect.innerHTML = html;
+
+      if (preferredField && ent.fields.some(f => f.name === preferredField)) {
+        fieldSelect.value = preferredField;
+      } else if (which === 'source') {
+        const pk = ent.fields.find(f => f.isId);
+        if (pk) fieldSelect.value = pk.name;
+      } else {
+        const fk = ent.fields.find(f => f.isForeignKey);
+        if (fk) fieldSelect.value = fk.name;
+        else if (fieldSelect.querySelector('option[value="__AUTO_FK__"]')) {
+          fieldSelect.value = '__AUTO_FK__';
+        }
+      }
+    }
+
+    function closeRelationModal() {
+      document.getElementById('relationModal').classList.add('hidden');
+    }
+
+    function saveRelationModal() {
+      const editId = document.getElementById('relEditId').value;
+      const srcEntityName = document.getElementById('relSourceEntity').value;
+      const srcFieldName = document.getElementById('relSourceField').value;
+      const tgtEntityName = document.getElementById('relTargetEntity').value;
+      let tgtFieldName = document.getElementById('relTargetField').value;
+      const srcCard = document.getElementById('relSourceCard').value;
+      const tgtCard = document.getElementById('relTargetCard').value;
+      const label = document.getElementById('relLabelInput').value.trim() || 'relación';
+      const identifying = document.getElementById('relIdentifying').value === 'true';
+      const onDelete = document.getElementById('relOnDelete').value;
+
+      const tgtEnt = state.entities.find(e => e.name === tgtEntityName);
+      const srcEnt = state.entities.find(e => e.name === srcEntityName);
+      if (!tgtEnt || !srcEnt) return;
+
+      const isNullableByRule = srcCard === '|o' || onDelete === 'SetNull';
+
+      if (tgtFieldName === '__AUTO_FK__') {
+        const srcPkObj = srcEnt.fields.find(f => f.name === srcFieldName);
+        const fkName = `${camelCase(srcEntityName)}Id`;
+        tgtFieldName = fkName;
+        if (!tgtEnt.fields.some(f => f.name === fkName)) {
+          tgtEnt.fields.push({
+            id: `${tgtEnt.name}_${fkName}`,
+            name: fkName,
+            type: srcPkObj ? srcPkObj.type : 'Int',
+            isId: false,
+            isUnique: tgtCard === '||' || tgtCard === '|o',
+            isNullable: isNullableByRule,
+            isArray: false,
+            isForeignKey: true,
+            defaultValue: '',
+            comment: ''
+          });
+        }
+      } else {
+        const fObj = tgtEnt.fields.find(f => f.name === tgtFieldName);
+        if (fObj && !fObj.isId) {
+          fObj.isForeignKey = true;
+          if (onDelete === 'SetNull') fObj.isNullable = true;
+        }
+      }
+
+      if (editId) {
+        const rel = state.relations.find(r => r.id === editId);
+        if (rel) {
+          rel.sourceEntity = srcEntityName;
+          rel.sourceField = srcFieldName;
+          rel.targetEntity = tgtEntityName;
+          rel.targetField = tgtFieldName;
+          rel.sourceCardinality = onDelete === 'SetNull' ? '|o' : srcCard;
+          rel.targetCardinality = tgtCard;
+          rel.name = label;
+          rel.identifying = identifying;
+          rel.onDelete = onDelete;
+        }
+      } else {
+        state.relations.push({
+          id: `rel_${Date.now()}`,
+          name: label,
+          sourceEntity: srcEntityName,
+          sourceField: srcFieldName,
+          targetEntity: tgtEntityName,
+          targetField: tgtFieldName,
+          sourceCardinality: onDelete === 'SetNull' ? '|o' : srcCard,
+          targetCardinality: tgtCard,
+          identifying,
+          onDelete
+        });
+      }
+
+      closeRelationModal();
+      pushHistory();
+      syncAllViews(true);
+      showToast('Relación guardada');
+    }
+
+    function deleteRelationFromModal() {
+      const editId = document.getElementById('relEditId').value;
+      if (!editId) return;
+      state.relations = state.relations.filter(r => r.id !== editId);
+      closeRelationModal();
+      pushHistory();
+      syncAllViews(true);
+      showToast('Relación eliminada');
+    }
+
+    // ============================================================================
+    // IMPORT / EXPORT / PRESETS / UTILITIES
+    // ============================================================================
+    function loadPreset(presetKey) {
+      const code = PRESETS[presetKey];
+      if (!code) return;
+
+      const isMermaid = /^\s*erDiagram\b/m.test(code);
+      if (isMermaid) {
+        state = parseMermaidER(code);
+        switchLeftTab('mermaid');
+      } else {
+        state = parsePrismaSchema(code);
+        switchLeftTab('prisma');
+      }
+
+      runSchemaValidation();
+      autoLayout('layered');
+      showToast('Plantilla cargada correctamente');
+    }
+
+    function handleFileUpload(event) {
+      const file = event.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const content = String(e.target?.result || '');
+        const ext = file.name.split('.').pop().toLowerCase();
+
+        if (ext === 'json') {
+          try {
+            const parsed = JSON.parse(content);
+            if (parsed.entities) {
+              state = parsed;
+              pushHistory();
+              syncAllViews(true);
+              fitToScreen();
+              showToast(`Archivo JSON "${file.name}" importado`);
+            }
+          } catch (err) {
+            showToast('Error al leer archivo JSON');
+          }
+          return;
+        }
+
+        if (ext === 'sql' || /CREATE\s+TABLE/i.test(content)) {
+          state = parseSqlDDL(content);
+          switchLeftTab('sql');
+        } else if (ext === 'mmd' || ext === 'mermaid' || /^\s*erDiagram\b/m.test(content)) {
+          state = parseMermaidER(content);
+          switchLeftTab('mermaid');
+        } else {
+          state = parsePrismaSchema(content);
+          switchLeftTab('prisma');
+        }
+
+        runSchemaValidation();
+        autoLayout('layered');
+        showToast(`Archivo "${file.name}" importado (${state.entities.length} entidades)`);
+      };
+      reader.readAsText(file);
+      event.target.value = '';
+    }
+
+    function exportFile(format) {
+      let content = '';
+      let filename = '';
+      let mime = 'text/plain;charset=utf-8';
+
+      if (format === 'prisma') {
+        content = generatePrismaSchema(state);
+        filename = 'schema.prisma';
+      } else if (format === 'mermaid') {
+        content = generateMermaidER(state);
+        filename = 'diagram.mmd';
+      } else if (format === 'postgres') {
+        content = generateSqlDDL(state, 'postgresql');
+        filename = 'schema-postgres.sql';
+      } else if (format === 'mysql') {
+        content = generateSqlDDL(state, 'mysql');
+        filename = 'schema-mysql.sql';
+      } else if (format === 'json') {
+        content = JSON.stringify(state, null, 2);
+        filename = 'erd-model.json';
+        mime = 'application/json;charset=utf-8';
+      } else if (format === 'svg') {
+        content = buildStandaloneSvgExport();
+        filename = 'erd-diagram.svg';
+        mime = 'image/svg+xml;charset=utf-8';
+      }
+
+      const blob = new Blob([content], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast(`Exportado: ${filename}`);
+    }
+
+    function buildStandaloneSvgExport() {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      state.entities.forEach(e => {
+        const h = CARD_HEADER_HEIGHT + e.fields.length * CARD_ROW_HEIGHT + 16;
+        minX = Math.min(minX, e.x - 40);
+        minY = Math.min(minY, e.y - 40);
+        maxX = Math.max(maxX, e.x + CARD_WIDTH + 40);
+        maxY = Math.max(maxY, e.y + h + 40);
+      });
+      if (!isFinite(minX)) { minX = 0; minY = 0; maxX = 800; maxY = 600; }
+
+      const width = maxX - minX;
+      const height = maxY - minY;
+
+      const entityBoxesSvg = state.entities.map(e => {
+        const h = CARD_HEADER_HEIGHT + e.fields.length * CARD_ROW_HEIGHT;
+        const rows = e.fields.map((f, i) => {
+          const ry = e.y + CARD_HEADER_HEIGHT + i * CARD_ROW_HEIGHT;
+          const badge = f.isId ? '[PK] ' : (f.isForeignKey ? '[FK] ' : '');
+          return `
+            <line x1="${e.x}" y1="${ry}" x2="${e.x + CARD_WIDTH}" y2="${ry}" stroke="#334155" stroke-width="1" />
+            <text x="${e.x + 12}" y="${ry + 19}" fill="#f8fafc" font-size="12" font-family="sans-serif">${escapeHtml(badge + f.name)}</text>
+            <text x="${e.x + CARD_WIDTH - 12}" y="${ry + 19}" text-anchor="end" fill="#94a3b8" font-size="12" font-family="monospace">${escapeHtml(f.type + (f.isNullable ? '?' : ''))}</text>
+          `;
+        }).join('');
+
+        return `
+          <g>
+            <rect x="${e.x}" y="${e.y}" width="${CARD_WIDTH}" height="${h}" rx="10" fill="#1e293b" stroke="#475569" stroke-width="1.5" />
+            <rect x="${e.x}" y="${e.y}" width="${CARD_WIDTH}" height="6" rx="3" fill="${e.color || '#3b82f6'}" />
+            <text x="${e.x + 14}" y="${e.y + 26}" fill="#ffffff" font-weight="bold" font-size="13" font-family="sans-serif">${escapeHtml(e.name)}</text>
+            ${rows}
+          </g>
+        `;
+      }).join('');
+
+      const relSvgContent = document.getElementById('relationsSvg').innerHTML
+        .replace(/var\(--background\)/g, '#0f172a')
+        .replace(/var\(--card\)/g, '#1e293b')
+        .replace(/var\(--foreground\)/g, '#f8fafc')
+        .replace(/var\(--muted-foreground\)/g, '#94a3b8')
+        .replace(/var\(--border\)/g, '#475569')
+        .replace(/var\(--primary\)/g, '#3b82f6');
+
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${minX} ${minY} ${width} ${height}" width="${width}" height="${height}">
+        <rect x="${minX}" y="${minY}" width="${width}" height="${height}" fill="#0f172a" />
+        ${relSvgContent}
+        ${entityBoxesSvg}
+      </svg>`;
+    }
+
+    function copyCodeToClipboard() {
+      const code = document.getElementById('codeTextarea').value;
+      navigator.clipboard.writeText(code).then(() => {
+        showToast('Código copiado al portapapeles');
+      });
+    }
+
+    function toggleSidebar() {
+      const sb = document.getElementById('leftSidebar');
+      sb.classList.toggle('hidden');
+    }
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.classList.remove('hidden');
+      clearTimeout(toast._timer);
+      toast._timer = setTimeout(() => {
+        toast.classList.add('hidden');
+      }, 2400);
+    }
+
+    function escapeHtml(str) {
+      return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function escapeAttr(str) {
+      return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (document.activeElement?.tagName === 'TEXTAREA' || document.activeElement?.tagName === 'INPUT') {
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        redo();
+      }
+    });
+
+    // ============================================================================
+    // INITIALIZE APP
+    // ============================================================================
+    window.addEventListener('DOMContentLoaded', () => {
+      loadPreset('ecommerce');
+    });
+  </script>
+</body>
+</html>
