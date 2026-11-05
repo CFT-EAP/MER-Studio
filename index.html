@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>MER Studio — Visualizador y Editor Prisma, Mermaid &amp; SQL</title>
+  <title>ERD Studio — Visualizador y Editor Prisma, Mermaid &amp; SQL</title>
   <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
   <style>
     :root {
@@ -262,8 +262,8 @@
     <!-- CENTER / RIGHT: INTERACTIVE ERD CANVAS -->
     <main class="flex-1 flex flex-col relative overflow-hidden bg-[var(--background)]">
       <!-- Floating Canvas Toolbar -->
-      <div class="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none z-20">
-        <div class="flex items-center gap-2 pointer-events-auto bg-[var(--card)]/95 backdrop-blur border border-[var(--border)] rounded-xl p-1.5 shadow-sm">
+      <div class="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none z-20 flex-wrap gap-2">
+        <div class="flex items-center gap-1.5 pointer-events-auto bg-[var(--card)]/95 backdrop-blur border border-[var(--border)] rounded-xl p-1.5 shadow-sm flex-wrap">
           <button onclick="toggleSidebar()" class="px-2.5 py-1 rounded-lg hover:bg-[var(--secondary)] text-xs font-medium transition" title="Mostrar/Ocultar panel lateral">
             ☰ Panel
           </button>
@@ -275,18 +275,28 @@
             🔗 Conectar
           </button>
           <div class="h-4 w-[1px] bg-[var(--border)]"></div>
-          <button onclick="autoLayout('layered')" class="px-2.5 py-1 rounded-lg hover:bg-[var(--secondary)] text-xs font-medium transition" title="Ordenar automáticamente en capas">
-            ✨ Auto-Ordenar
+          <button onclick="autoLayout('layered')" class="px-2.5 py-1 rounded-lg hover:bg-[var(--secondary)] text-xs font-medium transition" title="Ordenar por jerarquía Padre → Hijo sin cruces">
+            ✨ Jerárquico
           </button>
-          <button onclick="autoLayout('grid')" class="px-2.5 py-1 rounded-lg hover:bg-[var(--secondary)] text-xs font-medium transition" title="Ordenar en cuadrícula">
-            ⊞ Cuadrícula
+          <button onclick="autoLayout('clusters')" class="px-2.5 py-1 rounded-lg hover:bg-[var(--secondary)] text-xs font-medium transition" title="Agrupar por módulos y tablas centrales">
+            🗂️ Módulos
+          </button>
+          <button onclick="autoLayout('grid')" class="px-2.5 py-1 rounded-lg hover:bg-[var(--secondary)] text-xs font-medium transition" title="Ordenar en cuadrícula Masonry sin solapamientos">
+            ⊞ Masonry
+          </button>
+          <div class="h-4 w-[1px] bg-[var(--border)]"></div>
+          <button id="btnCompactMode" onclick="toggleCompactFieldsMode()" class="px-2.5 py-1 rounded-lg hover:bg-[var(--secondary)] text-xs font-medium transition" title="Alternar entre ver todos los campos o solo claves PK/FK/UK">
+            👁️ Todos
+          </button>
+          <button id="btnRoutingMode" onclick="toggleEdgeRoutingMode()" class="px-2.5 py-1 rounded-lg hover:bg-[var(--secondary)] text-xs font-medium transition" title="Alternar entre líneas ortogonales escalonadas o curvas suaves">
+            📐 Ortogonal
           </button>
         </div>
 
         <!-- Zoom & Stats -->
         <div class="flex items-center gap-2 pointer-events-auto bg-[var(--card)]/95 backdrop-blur border border-[var(--border)] rounded-xl p-1.5 shadow-sm">
-          <span id="statsLabel" class="text-xs text-[var(--muted-foreground)] px-2 hidden md:inline">0 entidades · 0 relaciones</span>
-          <div class="h-4 w-[1px] bg-[var(--border)] hidden md:block"></div>
+          <span id="statsLabel" class="text-xs text-[var(--muted-foreground)] px-2 hidden xl:inline">0 entidades · 0 relaciones</span>
+          <div class="h-4 w-[1px] bg-[var(--border)] hidden xl:block"></div>
           <button onclick="zoomBy(-0.15)" class="w-7 h-7 rounded-lg hover:bg-[var(--secondary)] text-xs font-bold flex items-center justify-center transition" title="Alejar">−</button>
           <button onclick="resetZoom()" id="zoomPercentBtn" class="px-2 py-1 rounded-lg hover:bg-[var(--secondary)] text-xs font-mono transition" title="Restablecer zoom">100%</button>
           <button onclick="zoomBy(0.15)" class="w-7 h-7 rounded-lg hover:bg-[var(--secondary)] text-xs font-bold flex items-center justify-center transition" title="Acercar">+</button>
@@ -311,7 +321,7 @@
         class="flex-1 w-full h-full canvas-grid relative overflow-hidden cursor-grab active:cursor-grabbing"
       >
         <!-- Transform Container -->
-        <div id="canvasWorld" class="absolute top-0 left-0 origin-top-left" style="width: 4000px; height: 4000px;">
+        <div id="canvasWorld" class="absolute top-0 left-0 origin-top-left" style="width: 12000px; height: 12000px;">
           <!-- SVG Layer for Relationships -->
           <svg id="relationsSvg" class="absolute inset-0 w-full h-full pointer-events-none overflow-visible"></svg>
           <!-- HTML Layer for Entity Cards -->
@@ -459,9 +469,14 @@
     let activeLeftTab = 'prisma'; // 'prisma' | 'mermaid' | 'sql' | 'inspector' | 'validator'
     let activeSqlDialect = 'postgresql'; // 'postgresql' | 'mysql'
     let selectedEntityId = null;
+    let hoveredEntityId = null;
     let selectedRelationId = null;
     let hoveredRelationId = null;
     let currentDiagnostics = [];
+    let compactFieldsMode = false; // false = all fields, true = only PK/FK/UK
+    let edgeRoutingMode = 'orthogonal'; // 'orthogonal' | 'curved'
+    let currentLayoutMode = 'layered'; // 'layered' | 'clusters' | 'grid'
+    let collapsedEntities = new Set(); // per-entity collapsed state
 
     // Viewport pan & zoom
     let viewport = {
@@ -2066,6 +2081,57 @@ model Task {
     }
 
     // ============================================================================
+    // CARD DIMENSIONS & COMPACT MODE HELPERS
+    // ============================================================================
+    function isEntityCompact(entity) {
+      if (collapsedEntities.has(entity.id)) return true;
+      return compactFieldsMode;
+    }
+
+    function getVisibleFieldsForEntity(entity) {
+      if (!isEntityCompact(entity)) return entity.fields;
+      const keyFields = entity.fields.filter(f => f.isId || f.isForeignKey || f.isUnique);
+      return keyFields.length > 0 ? keyFields : entity.fields.slice(0, 2);
+    }
+
+    function getEntityCardHeight(entity) {
+      const visible = getVisibleFieldsForEntity(entity);
+      const hiddenCount = entity.fields.length - visible.length;
+      const footerHeight = hiddenCount > 0 ? 28 : 0;
+      return CARD_HEADER_HEIGHT + visible.length * CARD_ROW_HEIGHT + footerHeight;
+    }
+
+    function toggleCompactFieldsMode() {
+      compactFieldsMode = !compactFieldsMode;
+      if (!compactFieldsMode) collapsedEntities.clear();
+      const btn = document.getElementById('btnCompactMode');
+      if (btn) {
+        btn.textContent = compactFieldsMode ? '👁️ Solo Claves' : '👁️ Todos';
+      }
+      autoLayout(currentLayoutMode, false);
+      showToast(compactFieldsMode ? 'Vista compacta: mostrando solo claves (PK/FK/UK)' : 'Mostrando todos los campos');
+    }
+
+    function toggleEntityCollapse(entityId) {
+      if (collapsedEntities.has(entityId)) {
+        collapsedEntities.delete(entityId);
+      } else {
+        collapsedEntities.add(entityId);
+      }
+      resolveOverlaps();
+      renderCanvas();
+    }
+
+    function toggleEdgeRoutingMode() {
+      edgeRoutingMode = edgeRoutingMode === 'orthogonal' ? 'curved' : 'orthogonal';
+      const btn = document.getElementById('btnRoutingMode');
+      if (btn) {
+        btn.textContent = edgeRoutingMode === 'orthogonal' ? '📐 Ortogonal' : '〰️ Curvas';
+      }
+      renderRelationsSvg(document.getElementById('relationsSvg'));
+    }
+
+    // ============================================================================
     // CANVAS RENDERING (ENTITIES + SVG CROW'S FOOT RELATIONS)
     // ============================================================================
     function renderCanvas() {
@@ -2081,21 +2147,37 @@ model Task {
       container.innerHTML = '';
       const enumNames = new Set((state.enums || []).map(e => e.name));
 
-      // Check entities with validation errors to highlight badge on card
       const entityErrors = new Set(
         currentDiagnostics.filter(d => d.severity === 'error' && d.entityId).map(d => d.entityId)
       );
 
+      // Determine connected entities for active highlight / focus dimming
+      const focusEntityId = hoveredEntityId || selectedEntityId;
+      const connectedToFocus = new Set();
+      if (focusEntityId) {
+        connectedToFocus.add(focusEntityId);
+        state.relations.forEach(r => {
+          if (r.sourceEntity === focusEntityId) connectedToFocus.add(r.targetEntity);
+          if (r.targetEntity === focusEntityId) connectedToFocus.add(r.sourceEntity);
+        });
+      }
+
       state.entities.forEach(entity => {
         const isSelected = selectedEntityId === entity.id;
         const hasError = entityErrors.has(entity.id);
+        const isDimmed = focusEntityId && !connectedToFocus.has(entity.name);
+
         const card = document.createElement('div');
-        card.className = `entity-card pointer-events-auto absolute bg-[var(--card)] border rounded-xl overflow-hidden shadow-md ${
-          isSelected ? 'border-[var(--primary)] ring-2 ring-[var(--primary)]/30' : (hasError ? 'border-red-500/70' : 'border-[var(--border)]')
-        }`;
+        card.className = `entity-card pointer-events-auto absolute bg-[var(--card)] border rounded-xl overflow-hidden shadow-md transition-opacity ${
+          isSelected ? 'border-[var(--primary)] ring-2 ring-[var(--primary)]/30 z-10' : (hasError ? 'border-red-500/70' : 'border-[var(--border)]')
+        } ${isDimmed ? 'opacity-45' : 'opacity-100'}`;
         card.style.width = `${CARD_WIDTH}px`;
         card.style.left = `${entity.x}px`;
         card.style.top = `${entity.y}px`;
+
+        const visibleFields = getVisibleFieldsForEntity(entity);
+        const hiddenCount = entity.fields.length - visibleFields.length;
+        const isCollapsed = isEntityCompact(entity);
 
         const header = document.createElement('div');
         header.className = 'h-[40px] px-3 flex items-center justify-between cursor-move select-none border-b border-[var(--border)]';
@@ -2103,16 +2185,30 @@ model Task {
         header.innerHTML = `
           <div class="flex items-center gap-2 truncate">
             <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${entity.color || '#3b82f6'}"></span>
-            <span class="font-bold text-xs text-[var(--foreground)] truncate">${escapeHtml(entity.name)}</span>
+            <span class="font-bold text-xs text-[var(--foreground)] truncate" title="${escapeAttr(entity.name)}">${escapeHtml(entity.name)}</span>
+            <span class="text-xs text-[var(--muted-foreground)] font-mono">${entity.fields.length}</span>
             ${hasError ? `<span title="Esta entidad tiene errores de validación" class="text-xs text-red-500 font-bold">⚠</span>` : ''}
           </div>
-          <div class="flex items-center gap-1 shrink-0">
+          <div class="flex items-center gap-0.5 shrink-0">
+            <button onclick="event.stopPropagation(); toggleEntityCollapse('${escapeAttr(entity.id)}')" title="${isCollapsed ? 'Expandir todos los campos' : 'Compactar campos'}" class="w-6 h-6 rounded hover:bg-[var(--secondary)] text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] flex items-center justify-center">${isCollapsed ? '▸' : '▾'}</button>
             <button onclick="event.stopPropagation(); quickAddField('${escapeAttr(entity.id)}')" title="Añadir campo" class="w-6 h-6 rounded hover:bg-[var(--secondary)] text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] flex items-center justify-center">+</button>
             <button onclick="event.stopPropagation(); inspectEntity('${escapeAttr(entity.id)}')" title="Editar en Inspector" class="w-6 h-6 rounded hover:bg-[var(--secondary)] text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] flex items-center justify-center">✎</button>
           </div>
         `;
 
         header.addEventListener('mousedown', (e) => startEntityDrag(e, entity));
+        card.addEventListener('mouseenter', () => {
+          if (!dragState) {
+            hoveredEntityId = entity.id;
+            renderRelationsSvg(document.getElementById('relationsSvg'));
+          }
+        });
+        card.addEventListener('mouseleave', () => {
+          if (hoveredEntityId === entity.id) {
+            hoveredEntityId = null;
+            renderRelationsSvg(document.getElementById('relationsSvg'));
+          }
+        });
         card.addEventListener('click', (e) => {
           e.stopPropagation();
           selectedEntityId = entity.id;
@@ -2125,7 +2221,7 @@ model Task {
         const fieldsBox = document.createElement('div');
         fieldsBox.className = 'divide-y divide-[var(--border)]/50';
 
-        entity.fields.forEach(f => {
+        visibleFields.forEach(f => {
           const isEnum = enumNames.has(f.type);
           const row = document.createElement('div');
           row.className = 'h-[30px] px-3 flex items-center justify-between gap-2 text-xs hover:bg-[var(--secondary)]/50 transition relative';
@@ -2156,6 +2252,20 @@ model Task {
           fieldsBox.appendChild(row);
         });
 
+        if (hiddenCount > 0) {
+          const moreRow = document.createElement('button');
+          moreRow.className = 'w-full h-[28px] px-3 flex items-center justify-center text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] bg-[var(--background)]/40 hover:bg-[var(--secondary)] transition font-medium';
+          moreRow.textContent = `+ ${hiddenCount} campo${hiddenCount > 1 ? 's' : ''} más (clic para expandir)`;
+          moreRow.onclick = (e) => {
+            e.stopPropagation();
+            collapsedEntities.delete(entity.id);
+            if (compactFieldsMode) compactFieldsMode = false;
+            resolveOverlaps();
+            renderCanvas();
+          };
+          fieldsBox.appendChild(moreRow);
+        }
+
         card.appendChild(fieldsBox);
         container.appendChild(card);
       });
@@ -2164,7 +2274,9 @@ model Task {
     }
 
     function getFieldAnchorPoint(entity, fieldName, side) {
-      const idx = Math.max(0, entity.fields.findIndex(f => f.name === fieldName));
+      const visible = getVisibleFieldsForEntity(entity);
+      let idx = visible.findIndex(f => f.name === fieldName);
+      if (idx === -1) idx = 0;
       const y = entity.y + CARD_HEADER_HEIGHT + idx * CARD_ROW_HEIGHT + CARD_ROW_HEIGHT / 2;
       const x = side === 'right' ? entity.x + CARD_WIDTH : entity.x;
       return { x, y };
@@ -2207,13 +2319,20 @@ model Task {
       const entityMap = Object.fromEntries(state.entities.map(e => [e.name, e]));
       let svgHtml = '';
 
-      state.relations.forEach(rel => {
+      const focusEntityId = hoveredEntityId || selectedEntityId;
+
+      state.relations.forEach((rel, relIdx) => {
         const srcEnt = entityMap[rel.sourceEntity];
         const tgtEnt = entityMap[rel.targetEntity];
         if (!srcEnt || !tgtEnt) return;
 
-        const isSelected = selectedRelationId === rel.id || hoveredRelationId === rel.id;
-        const strokeColor = isSelected ? 'var(--primary)' : 'var(--muted-foreground)';
+        const isDirectHover = selectedRelationId === rel.id || hoveredRelationId === rel.id;
+        const isConnectedToFocus = focusEntityId && (rel.sourceEntity === focusEntityId || rel.targetEntity === focusEntityId);
+        const isHighlighted = isDirectHover || isConnectedToFocus;
+        const isDimmed = (focusEntityId || hoveredRelationId) && !isHighlighted;
+
+        const strokeColor = isHighlighted ? 'var(--primary)' : 'var(--muted-foreground)';
+        const opacityAttr = isDimmed ? 'opacity="0.18"' : 'opacity="0.92"';
         const dashArray = rel.identifying === false ? 'stroke-dasharray="6,5"' : '';
 
         let srcSide = 'right';
@@ -2225,9 +2344,9 @@ model Task {
         } else {
           const srcCenter = srcEnt.x + CARD_WIDTH / 2;
           const tgtCenter = tgtEnt.x + CARD_WIDTH / 2;
-          if (Math.abs(srcCenter - tgtCenter) < CARD_WIDTH * 0.75) {
-            srcSide = 'right';
-            tgtSide = 'right';
+          if (Math.abs(srcCenter - tgtCenter) < CARD_WIDTH * 0.65) {
+            srcSide = (relIdx % 2 === 0) ? 'right' : 'left';
+            tgtSide = srcSide;
           } else if (srcCenter <= tgtCenter) {
             srcSide = 'right';
             tgtSide = 'left';
@@ -2243,34 +2362,77 @@ model Task {
         const dir1 = srcSide === 'right' ? 1 : -1;
         const dir2 = tgtSide === 'right' ? 1 : -1;
 
-        const dist = Math.max(70, Math.abs(p2.x - p1.x) * 0.48);
-        const c1x = p1.x + dir1 * dist;
-        const c2x = p2.x + dir2 * dist;
+        // Stagger channel offset so multiple lines between columns don't overlap
+        const stagger = ((relIdx % 5) - 2) * 14;
 
-        const pathData = `M ${p1.x} ${p1.y} C ${c1x} ${p1.y}, ${c2x} ${p2.y}, ${p2.x} ${p2.y}`;
+        let pathData = '';
+        let midX = 0;
+        let midY = 0;
 
-        const midX = 0.125 * p1.x + 0.375 * c1x + 0.375 * c2x + 0.125 * p2.x;
-        const midY = 0.125 * p1.y + 0.375 * p1.y + 0.375 * p2.y + 0.125 * p2.y;
+        if (edgeRoutingMode === 'orthogonal') {
+          const stub = 24;
+          const xStart = p1.x + dir1 * stub;
+          const xEnd = p2.x + dir2 * stub;
+
+          if (srcSide === tgtSide) {
+            // Same-side loop (e.g., vertical column neighbors or self-relation)
+            const outerX = srcSide === 'right'
+              ? Math.max(p1.x, p2.x) + 38 + Math.abs(stagger)
+              : Math.min(p1.x, p2.x) - 38 - Math.abs(stagger);
+            pathData = `M ${p1.x} ${p1.y} L ${outerX} ${p1.y} L ${outerX} ${p2.y} L ${p2.x} ${p2.y}`;
+            midX = outerX;
+            midY = (p1.y + p2.y) / 2;
+          } else {
+            const channelX = (xStart + xEnd) / 2 + stagger;
+            const r = Math.min(10, Math.abs(p2.y - p1.y) / 2, Math.abs(channelX - p1.x) / 2);
+            if (Math.abs(p2.y - p1.y) < 4) {
+              pathData = `M ${p1.x} ${p1.y} L ${p2.x} ${p2.y}`;
+            } else {
+              const sy = p2.y > p1.y ? 1 : -1;
+              const sx1 = channelX > p1.x ? 1 : -1;
+              const sx2 = p2.x > channelX ? 1 : -1;
+              pathData = [
+                `M ${p1.x} ${p1.y}`,
+                `L ${channelX - sx1 * r} ${p1.y}`,
+                `Q ${channelX} ${p1.y} ${channelX} ${p1.y + sy * r}`,
+                `L ${channelX} ${p2.y - sy * r}`,
+                `Q ${channelX} ${p2.y} ${channelX + sx2 * r} ${p2.y}`,
+                `L ${p2.x} ${p2.y}`
+              ].join(' ');
+            }
+            midX = channelX;
+            midY = (p1.y + p2.y) / 2;
+          }
+        } else {
+          // Smooth curved Bezier routing with staggered control points
+          const dist = Math.max(68, Math.abs(p2.x - p1.x) * 0.45) + (srcSide === tgtSide ? Math.abs(stagger) * 1.5 : stagger);
+          const c1x = p1.x + dir1 * dist;
+          const c2x = p2.x + dir2 * dist;
+          pathData = `M ${p1.x} ${p1.y} C ${c1x} ${p1.y}, ${c2x} ${p2.y}, ${p2.x} ${p2.y}`;
+          midX = 0.125 * p1.x + 0.375 * c1x + 0.375 * c2x + 0.125 * p2.x;
+          midY = 0.125 * p1.y + 0.375 * p1.y + 0.375 * p2.y + 0.125 * p2.y;
+        }
 
         const srcMarker = buildCrowsFootSymbolSvg(p1.x, p1.y, dir1, rel.sourceCardinality, strokeColor);
         const tgtMarker = buildCrowsFootSymbolSvg(p2.x, p2.y, dir2, rel.targetCardinality, strokeColor);
 
         const labelText = rel.name || '';
-        const labelWidth = Math.max(48, labelText.length * 7 + 18);
+        const labelWidth = Math.max(46, labelText.length * 6.8 + 16);
+        const showLabel = labelText && (state.relations.length <= 18 || isHighlighted);
 
         svgHtml += `
-          <g class="pointer-events-auto cursor-pointer"
+          <g class="pointer-events-auto cursor-pointer" ${opacityAttr}
              onmouseenter="setHoveredRelation('${escapeAttr(rel.id)}')"
              onmouseleave="setHoveredRelation(null)"
              onclick="event.stopPropagation(); openRelationModal('${escapeAttr(rel.id)}')">
             <path d="${pathData}" fill="none" stroke="transparent" stroke-width="14" />
-            <path class="rel-path" d="${pathData}" fill="none" stroke="${strokeColor}" stroke-width="${isSelected ? 2.6 : 1.8}" ${dashArray} />
+            <path class="rel-path" d="${pathData}" fill="none" stroke="${strokeColor}" stroke-width="${isHighlighted ? 2.6 : 1.6}" ${dashArray} />
             ${srcMarker}
             ${tgtMarker}
-            ${labelText ? `
+            ${showLabel ? `
               <g transform="translate(${midX}, ${midY})">
-                <rect x="${-labelWidth / 2}" y="-11" width="${labelWidth}" height="22" rx="6"
-                      fill="var(--card)" stroke="${isSelected ? 'var(--primary)' : 'var(--border)'}" stroke-width="1.2" />
+                <rect x="${-labelWidth / 2}" y="-10" width="${labelWidth}" height="20" rx="6"
+                      fill="var(--card)" stroke="${isHighlighted ? 'var(--primary)' : 'var(--border)'}" stroke-width="1.2" />
                 <text x="0" y="4" text-anchor="middle" fill="var(--foreground)" font-size="12" font-family="sans-serif">
                   ${escapeHtml(labelText)}
                 </text>
@@ -2358,7 +2520,7 @@ model Task {
       const worldY = (mouseY - viewport.y) / viewport.zoom;
 
       const factor = e.deltaY < 0 ? 1.1 : 0.9;
-      const newZoom = Math.min(2.2, Math.max(0.3, viewport.zoom * factor));
+      const newZoom = Math.min(2.2, Math.max(0.15, viewport.zoom * factor));
 
       viewport.x = mouseX - worldX * newZoom;
       viewport.y = mouseY - worldY * newZoom;
@@ -2374,7 +2536,7 @@ model Task {
       const worldX = (centerX - viewport.x) / viewport.zoom;
       const worldY = (centerY - viewport.y) / viewport.zoom;
 
-      const newZoom = Math.min(2.2, Math.max(0.3, viewport.zoom + delta));
+      const newZoom = Math.min(2.2, Math.max(0.15, viewport.zoom + delta));
       viewport.x = centerX - worldX * newZoom;
       viewport.y = centerY - worldY * newZoom;
       viewport.zoom = newZoom;
@@ -2394,92 +2556,324 @@ model Task {
 
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       state.entities.forEach(e => {
-        const h = CARD_HEADER_HEIGHT + e.fields.length * CARD_ROW_HEIGHT + 16;
+        const h = getEntityCardHeight(e) + 16;
         minX = Math.min(minX, e.x);
         minY = Math.min(minY, e.y);
         maxX = Math.max(maxX, e.x + CARD_WIDTH);
         maxY = Math.max(maxY, e.y + h);
       });
 
-      const contentW = Math.max(300, maxX - minX + 120);
-      const contentH = Math.max(300, maxY - minY + 140);
+      const contentW = Math.max(300, maxX - minX + 140);
+      const contentH = Math.max(300, maxY - minY + 150);
 
       const scaleX = rect.width / contentW;
       const scaleY = rect.height / contentH;
-      viewport.zoom = Math.min(1.25, Math.max(0.35, Math.min(scaleX, scaleY)));
+      viewport.zoom = Math.min(1.15, Math.max(0.16, Math.min(scaleX, scaleY)));
 
       viewport.x = (rect.width - (maxX - minX) * viewport.zoom) / 2 - minX * viewport.zoom;
-      viewport.y = (rect.height - (maxY - minY) * viewport.zoom) / 2 - minY * viewport.zoom + 16;
+      viewport.y = (rect.height - (maxY - minY) * viewport.zoom) / 2 - minY * viewport.zoom + 18;
       renderCanvas();
     }
 
     // ============================================================================
-    // AUTO-LAYOUT ALGORITHMS
+    // SMART AUTO-LAYOUT ALGORITHMS (LAYERED SUGIYAMA, CLUSTERS, MASONRY GRID)
     // ============================================================================
-    function autoLayout(mode = 'layered') {
+    function resolveOverlaps() {
+      // Push down any cards in the same horizontal band that overlap vertically
+      const sorted = [...state.entities].sort((a, b) => (a.x - b.x) || (a.y - b.y));
+      for (let i = 0; i < sorted.length; i++) {
+        for (let j = i + 1; j < sorted.length; j++) {
+          const a = sorted[i];
+          const b = sorted[j];
+          const horizOverlap = Math.abs(a.x - b.x) < (CARD_WIDTH + 36);
+          if (!horizOverlap) continue;
+          const aBottom = a.y + getEntityCardHeight(a) + 36;
+          if (b.y < aBottom && b.y >= a.y - 10) {
+            b.y = Math.round(aBottom / 12) * 12;
+          }
+        }
+      }
+    }
+
+    function autoLayout(mode = 'layered', showNotification = true) {
       if (state.entities.length === 0) return;
+      currentLayoutMode = mode;
+
+      const COL_STEP = CARD_WIDTH + 164; // 432px horizontal pitch for clean routing channels
+      const ROW_GAP = 44;
+      const START_X = 72;
+      const START_Y = 72;
+
+      // Build degree & adjacency maps
+      const outNeighbors = {};
+      const inNeighbors = {};
+      const allNeighbors = {};
+      const degree = {};
+
+      state.entities.forEach(e => {
+        outNeighbors[e.name] = [];
+        inNeighbors[e.name] = [];
+        allNeighbors[e.name] = new Set();
+        degree[e.name] = 0;
+      });
+
+      state.relations.forEach(r => {
+        if (r.sourceEntity === r.targetEntity) return;
+        if (outNeighbors[r.sourceEntity] && inNeighbors[r.targetEntity]) {
+          outNeighbors[r.sourceEntity].push(r.targetEntity);
+          inNeighbors[r.targetEntity].push(r.sourceEntity);
+          allNeighbors[r.sourceEntity].add(r.targetEntity);
+          allNeighbors[r.targetEntity].add(r.sourceEntity);
+          degree[r.sourceEntity] = (degree[r.sourceEntity] || 0) + 1;
+          degree[r.targetEntity] = (degree[r.targetEntity] || 0) + 1;
+        }
+      });
 
       if (mode === 'grid') {
-        const cols = Math.max(2, Math.ceil(Math.sqrt(state.entities.length)));
-        state.entities.forEach((ent, idx) => {
-          const c = idx % cols;
-          const r = Math.floor(idx / cols);
-          ent.x = 60 + c * 350;
-          ent.y = 70 + r * 300;
-        });
-      } else {
-        const inDegree = {};
-        const adj = {};
-        state.entities.forEach(e => {
-          inDegree[e.name] = 0;
-          adj[e.name] = [];
-        });
-        state.relations.forEach(r => {
-          if (r.sourceEntity !== r.targetEntity && adj[r.sourceEntity] && inDegree[r.targetEntity] !== undefined) {
-            adj[r.sourceEntity].push(r.targetEntity);
-            inDegree[r.targetEntity]++;
+        // Masonry shortest-column bin packing sorted by connectivity
+        const total = state.entities.length;
+        const cols = Math.max(2, Math.min(6, Math.ceil(Math.sqrt(total * 1.25))));
+        const colHeights = new Array(cols).fill(START_Y);
+
+        const ordered = [...state.entities].sort((a, b) => (degree[b.name] - degree[a.name]) || a.name.localeCompare(b.name));
+
+        ordered.forEach(ent => {
+          // Pick column with minimum current Y height
+          let minCol = 0;
+          for (let c = 1; c < cols; c++) {
+            if (colHeights[c] < colHeights[minCol]) minCol = c;
           }
+          ent.x = START_X + minCol * COL_STEP;
+          ent.y = colHeights[minCol];
+          colHeights[minCol] += getEntityCardHeight(ent) + ROW_GAP;
         });
+
+      } else if (mode === 'clusters') {
+        // Domain / Module Cluster Packing (Hub & Spoke groups)
+        const visited = new Set();
+        const clusters = [];
+
+        // Sort hubs by highest total degree
+        const hubs = [...state.entities].sort((a, b) => (degree[b.name] - degree[a.name]) || a.name.localeCompare(b.name));
+
+        hubs.forEach(hub => {
+          if (visited.has(hub.name)) return;
+          if (degree[hub.name] === 0) return;
+
+          const cluster = [hub];
+          visited.add(hub.name);
+
+          // Add direct neighbors not yet visited
+          const neighbors = [...allNeighbors[hub.name]]
+            .map(n => state.entities.find(e => e.name === n))
+            .filter(Boolean)
+            .sort((a, b) => degree[a.name] - degree[b.name]);
+
+          neighbors.forEach(nb => {
+            if (!visited.has(nb.name)) {
+              visited.add(nb.name);
+              cluster.push(nb);
+            }
+          });
+
+          clusters.push(cluster);
+        });
+
+        // Standalone entities
+        const orphans = state.entities.filter(e => !visited.has(e.name));
+        if (orphans.length > 0) clusters.push(orphans);
+
+        let clusterOffsetX = START_X;
+        let clusterOffsetY = START_Y;
+        let rowMaxBottom = START_Y;
+        const maxCanvasRowWidth = Math.max(3, Math.ceil(Math.sqrt(state.entities.length))) * COL_STEP;
+
+        clusters.forEach(cluster => {
+          const clusterCols = Math.min(3, Math.max(1, Math.ceil(Math.sqrt(cluster.length))));
+          const clusterWidth = clusterCols * COL_STEP;
+
+          if (clusterOffsetX > START_X && clusterOffsetX + clusterWidth > START_X + maxCanvasRowWidth) {
+            clusterOffsetX = START_X;
+            clusterOffsetY = rowMaxBottom + 64;
+          }
+
+          const colBottoms = new Array(clusterCols).fill(clusterOffsetY);
+          cluster.forEach(ent => {
+            let bestCol = 0;
+            for (let c = 1; c < clusterCols; c++) {
+              if (colBottoms[c] < colBottoms[bestCol]) bestCol = c;
+            }
+            ent.x = clusterOffsetX + bestCol * COL_STEP;
+            ent.y = colBottoms[bestCol];
+            colBottoms[bestCol] += getEntityCardHeight(ent) + ROW_GAP;
+          });
+
+          const clusterBottom = Math.max(...colBottoms);
+          rowMaxBottom = Math.max(rowMaxBottom, clusterBottom);
+          clusterOffsetX += clusterWidth + 60;
+        });
+
+      } else {
+        // 'layered': Sugiyama Hierarchical Layout + Barycenter Crossing Reduction + Balanced Sub-Column Wrapping
+        const connectedEntities = state.entities.filter(e => degree[e.name] > 0);
+        const isolatedEntities = state.entities.filter(e => degree[e.name] === 0);
 
         const layerOf = {};
-        const queue = [];
-        state.entities.forEach(e => {
-          if (inDegree[e.name] === 0) {
-            layerOf[e.name] = 0;
-            queue.push(e.name);
-          }
+        const inDegCopy = {};
+        connectedEntities.forEach(e => {
+          inDegCopy[e.name] = inNeighbors[e.name].length;
         });
 
-        while (queue.length > 0) {
+        // Topological BFS with cycle handling
+        const assigned = new Set();
+        const queue = [];
+
+        connectedEntities
+          .filter(e => inDegCopy[e.name] === 0)
+          .sort((a, b) => outNeighbors[b.name].length - outNeighbors[a.name].length)
+          .forEach(e => {
+            layerOf[e.name] = 0;
+            assigned.add(e.name);
+            queue.push(e.name);
+          });
+
+        while (assigned.size < connectedEntities.length) {
+          if (queue.length === 0) {
+            // Break cycle by picking unassigned node with highest out-degree
+            const nextRoot = connectedEntities
+              .filter(e => !assigned.has(e.name))
+              .sort((a, b) => (outNeighbors[b.name].length - inNeighbors[b.name].length) - (outNeighbors[a.name].length - inNeighbors[a.name].length))[0];
+            if (!nextRoot) break;
+            layerOf[nextRoot.name] = 0;
+            assigned.add(nextRoot.name);
+            queue.push(nextRoot.name);
+          }
+
           const curr = queue.shift();
-          (adj[curr] || []).forEach(next => {
-            layerOf[next] = Math.max(layerOf[next] || 0, (layerOf[curr] || 0) + 1);
-            inDegree[next]--;
-            if (inDegree[next] === 0) queue.push(next);
+          const currLayer = layerOf[curr] || 0;
+
+          (outNeighbors[curr] || []).forEach(childName => {
+            if (!assigned.has(childName)) {
+              layerOf[childName] = Math.min(5, Math.max(layerOf[childName] || 0, currLayer + 1));
+              inDegCopy[childName]--;
+              if (inDegCopy[childName] <= 0) {
+                assigned.add(childName);
+                queue.push(childName);
+              }
+            }
           });
         }
 
-        const layers = {};
-        state.entities.forEach(e => {
-          const l = Math.min(4, layerOf[e.name] !== undefined ? layerOf[e.name] : 1);
-          if (!layers[l]) layers[l] = [];
-          layers[l].push(e);
+        // Group connected entities by layer
+        const rawLayers = {};
+        connectedEntities.forEach(e => {
+          const l = layerOf[e.name] || 0;
+          if (!rawLayers[l]) rawLayers[l] = [];
+          rawLayers[l].push(e);
         });
 
-        Object.keys(layers).sort((a, b) => Number(a) - Number(b)).forEach((layerIdx, colIdx) => {
-          let currentY = 70;
-          layers[layerIdx].forEach(ent => {
-            ent.x = 60 + colIdx * 370;
-            ent.y = currentY;
-            const cardH = CARD_HEADER_HEIGHT + ent.fields.length * CARD_ROW_HEIGHT + 48;
-            currentY += cardH;
+        const layerKeys = Object.keys(rawLayers).map(Number).sort((a, b) => a - b);
+
+        // Barycenter ordering (minimize edge crossings across layers)
+        const posIndex = {};
+        layerKeys.forEach(l => {
+          rawLayers[l].sort((a, b) => degree[b.name] - degree[a.name]);
+          rawLayers[l].forEach((e, i) => { posIndex[e.name] = i; });
+        });
+
+        for (let sweep = 0; sweep < 4; sweep++) {
+          // Forward sweep
+          for (let i = 1; i < layerKeys.length; i++) {
+            const l = layerKeys[i];
+            rawLayers[l].sort((a, b) => {
+              const parentsA = inNeighbors[a.name];
+              const parentsB = inNeighbors[b.name];
+              const baryA = parentsA.length ? parentsA.reduce((s, p) => s + (posIndex[p] ?? 0), 0) / parentsA.length : posIndex[a.name];
+              const baryB = parentsB.length ? parentsB.reduce((s, p) => s + (posIndex[p] ?? 0), 0) / parentsB.length : posIndex[b.name];
+              return baryA - baryB;
+            });
+            rawLayers[l].forEach((e, idx) => { posIndex[e.name] = idx; });
+          }
+          // Backward sweep
+          for (let i = layerKeys.length - 2; i >= 0; i--) {
+            const l = layerKeys[i];
+            rawLayers[l].sort((a, b) => {
+              const childrenA = outNeighbors[a.name];
+              const childrenB = outNeighbors[b.name];
+              const baryA = childrenA.length ? childrenA.reduce((s, c) => s + (posIndex[c] ?? 0), 0) / childrenA.length : posIndex[a.name];
+              const baryB = childrenB.length ? childrenB.reduce((s, c) => s + (posIndex[c] ?? 0), 0) / childrenB.length : posIndex[b.name];
+              return baryA - baryB;
+            });
+            rawLayers[l].forEach((e, idx) => { posIndex[e.name] = idx; });
+          }
+        }
+
+        // Split oversized layers into balanced sub-columns so no column gets excessively tall
+        const MAX_COL_HEIGHT = 1150;
+        const MAX_CARDS_PER_SUBCOL = Math.max(3, Math.ceil(Math.sqrt(connectedEntities.length * 0.9)));
+        const visualColumns = [];
+
+        layerKeys.forEach(l => {
+          const entitiesInLayer = rawLayers[l];
+          let currentCol = [];
+          let currentHeight = 0;
+
+          entitiesInLayer.forEach(ent => {
+            const h = getEntityCardHeight(ent) + ROW_GAP;
+            if (currentCol.length > 0 && (currentCol.length >= MAX_CARDS_PER_SUBCOL || currentHeight + h > MAX_COL_HEIGHT)) {
+              visualColumns.push(currentCol);
+              currentCol = [];
+              currentHeight = 0;
+            }
+            currentCol.push(ent);
+            currentHeight += h;
+          });
+
+          if (currentCol.length > 0) visualColumns.push(currentCol);
+        });
+
+        // Compute height of each visual column to vertically center shorter columns
+        const colTotalHeights = visualColumns.map(col =>
+          col.reduce((sum, ent) => sum + getEntityCardHeight(ent) + ROW_GAP, -ROW_GAP)
+        );
+        const maxColHeight = colTotalHeights.length > 0 ? Math.max(...colTotalHeights) : 0;
+
+        visualColumns.forEach((col, colIdx) => {
+          const colH = colTotalHeights[colIdx];
+          let yCursor = START_Y + Math.max(0, Math.round(((maxColHeight - colH) / 2) / 12) * 12);
+
+          col.forEach(ent => {
+            ent.x = START_X + colIdx * COL_STEP;
+            ent.y = yCursor;
+            yCursor += getEntityCardHeight(ent) + ROW_GAP;
           });
         });
+
+        // Place isolated / lookup entities neatly below or in Masonry columns if no relations exist
+        if (isolatedEntities.length > 0) {
+          const isoCols = Math.max(2, Math.min(5, Math.max(visualColumns.length, Math.ceil(Math.sqrt(isolatedEntities.length)))));
+          const baseIsoY = visualColumns.length > 0 ? START_Y + maxColHeight + 96 : START_Y;
+          const isoColBottoms = new Array(isoCols).fill(baseIsoY);
+
+          isolatedEntities.forEach(ent => {
+            let bestCol = 0;
+            for (let c = 1; c < isoCols; c++) {
+              if (isoColBottoms[c] < isoColBottoms[bestCol]) bestCol = c;
+            }
+            ent.x = START_X + bestCol * COL_STEP;
+            ent.y = isoColBottoms[bestCol];
+            isoColBottoms[bestCol] += getEntityCardHeight(ent) + ROW_GAP;
+          });
+        }
       }
 
+      resolveOverlaps();
       pushHistory();
       fitToScreen();
-      showToast('Diagrama ordenado automáticamente');
+      if (showNotification) {
+        const modeNames = { layered: 'Jerárquico', clusters: 'Por Módulos', grid: 'Cuadrícula Masonry' };
+        showToast(`Diagrama ordenado (${modeNames[mode] || mode})`);
+      }
     }
 
     // ============================================================================
@@ -2584,12 +2978,31 @@ model Task {
           return;
         }
 
+        // Check how many models are new (not previously positioned)
+        const newEntitiesCount = parsed.entities.filter(e => !existingPos[e.name]).length;
+        const entityCountChanged = parsed.entities.length !== state.entities.length;
+
         state = parsed;
-        pushHistory();
+
+        // Auto-enable compact mode if user pasted a very large schema (> 14 entities)
+        if (newEntitiesCount >= 12 && !compactFieldsMode) {
+          compactFieldsMode = true;
+          const btn = document.getElementById('btnCompactMode');
+          if (btn) btn.textContent = '👁️ Solo Claves';
+        }
+
         runSchemaValidation();
-        renderCanvas();
+
+        if (newEntitiesCount > 0 || entityCountChanged || showFeedback) {
+          autoLayout(currentLayoutMode, false);
+        } else {
+          resolveOverlaps();
+          pushHistory();
+          renderCanvas();
+        }
+
         setParseStatus('ok', `Sincronizado (${state.entities.length} entidades, ${state.relations.length} relaciones)`);
-        if (showFeedback) showToast('Código aplicado al diagrama');
+        if (showFeedback) showToast('Código aplicado y ordenado automáticamente');
       } catch (err) {
         setParseStatus('error', `Error de sintaxis: ${err.message}`);
       }
@@ -2820,6 +3233,7 @@ model Task {
 
       state.entities.push(newEnt);
       selectedEntityId = newEnt.id;
+      resolveOverlaps();
       pushHistory();
       syncAllViews(true);
       showToast(`Entidad "${name}" creada`);
@@ -2847,6 +3261,7 @@ model Task {
         comment: ''
       });
       selectedEntityId = ent.id;
+      resolveOverlaps();
       pushHistory();
       syncAllViews(true);
     }
